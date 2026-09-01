@@ -1,0 +1,128 @@
+begin model
+
+begin parameters
+  Ve 0.05
+  Vc 25
+  A 25
+  f 602.3
+  kon 1.7E-5/Ve
+  koff 0.01
+  kp 0.015/A
+  kd 0.001
+  KZB 0.0083
+  kzb KZB/Vc
+  kzu 0.125
+  kzp 4.98E-5/Vc
+  kzd 5.64E-5/Vc
+  ksbPP 4.15E-4/Vc
+  ksuPP 1.7
+  ksbU 4.15E-4/Vc
+  ksuU 1.7
+  kdl 0.001
+  KPR 0.01
+  kh 10000
+  KSB 0.0083
+  ksb KSB/Vc
+  ksu 0.125
+  ksbss ksb*0.1
+  KSA0 0.0026
+  KST0 0.0022
+  ksa KSA0
+  kst KST0/Vc
+  ksi 1.21
+  ksil 0.014/Vc
+  ksih 0.025/Vc
+  ksd 5.64E-5/Vc
+  kfd 0.01
+  L0 60.0*A
+  adaptor0 270.3669945424892
+  A0 adaptor0*A
+  LCK0 390.0*A
+  Z0 1131.0
+  ZAP0 Z0*Vc
+  SS0 754.0
+  SYK0 SS0*Vc
+  S0 180.0*Vc
+  _rateLaw1 kh*10
+  _rateLaw2 kh*10
+  _rateLaw3 kh*10
+  _rateLaw4 kh*10
+end parameters
+
+begin molecule types
+  A(State~UZAP~PZAP~SHP~uSYK~pSYK)
+  Gamma(receptor,ITAM1~U~PP,ITAM2~U~PP)
+  LCK()
+  ligand(receptor)
+end molecule types
+
+begin species
+  A(State~UZAP) ZAP0
+  Gamma(ITAM1~U,ITAM2~U,receptor) A0
+  LCK() LCK0
+  ligand(receptor) L0
+  A(State~SHP) S0
+  A(State~uSYK) SYK0
+end species
+
+begin observables
+  Molecules PZAP_total A(State~PZAP!?)
+  Molecules pSYK_total A(State~pSYK!?)
+end observables
+
+begin reaction rules
+  r2_ligand_binding: ligand(receptor) + Gamma(receptor,ITAM1~U,ITAM2~U) <-> Gamma(receptor!1,ITAM1~U,ITAM2~U).ligand(receptor!1) kon,koff 
+  r3_ITAM1_phosphorylation: LCK() + Gamma(receptor!+,ITAM1~U) -> LCK() + Gamma(receptor!+,ITAM1~PP) kp 
+  r4_ITAM2_phosphorylation: LCK() + Gamma(receptor!+,ITAM2~U) -> LCK() + Gamma(receptor!+,ITAM2~PP) kp 
+  r5_ITAM1_dephosphorylation: Gamma(receptor!+,ITAM1~PP) -> Gamma(receptor!+,ITAM1~U) kd 
+  r6_ITAM2_dephosphorylation: Gamma(receptor!+,ITAM2~PP) -> Gamma(receptor!+,ITAM2~U) kd 
+  r9_PZAP_binding_ITAM1: A(State~PZAP) + Gamma(receptor!+,ITAM1~PP) <-> Gamma(receptor!+,ITAM1~PP!1).A(State~PZAP!1) kzb,kzu 
+  r10_PZAP_binding_ITAM2: A(State~PZAP) + Gamma(receptor!+,ITAM2~PP) <-> Gamma(receptor!+,ITAM2~PP!1).A(State~PZAP!1) kzb,kzu 
+  r7_UZAP_binding_ITAM1: A(State~UZAP) + Gamma(receptor!+,ITAM1~PP) <-> Gamma(receptor!+,ITAM1~PP!1).A(State~UZAP!1) kzb,kzu 
+  r8_UZAP_binding_ITAM2: A(State~UZAP) + Gamma(receptor!+,ITAM2~PP) <-> Gamma(receptor!+,ITAM2~PP!1).A(State~UZAP!1) kzb,kzu 
+  r34_uZAP_phosphorylation_by_LCK: A(State~UZAP!+) + LCK() -> A(State~PZAP!+) + LCK() kzp 
+  r32_bound_pZAP_dephosphorylation_by_SHP: A(State~SHP!+)%1 + A(State~PZAP!+)%2 -> A(State~SHP!+)%1 + A(State~UZAP!+)%2 kzd 
+  r41_free_ZAP_dephosphorylation_SHP: A(State~SHP!+)%1 + A(State~PZAP)%2 -> A(State~SHP!+)%1 + A(State~UZAP)%2 kzd 
+  r21_SHP_binding_ITAM1_PP: A(State~SHP) + Gamma(receptor!+,ITAM1~PP) <-> Gamma(receptor!+,ITAM1~PP!1).A(State~SHP!1) ksbPP,ksuPP 
+  r22_SHP_binding_ITAM2_PP: A(State~SHP) + Gamma(receptor!+,ITAM2~PP) <-> Gamma(receptor!+,ITAM2~PP!1).A(State~SHP!1) ksbPP,ksuPP 
+  r19_SHP_binding_ITAM1_U: A(State~SHP) + Gamma(receptor!+,ITAM1~U) <-> Gamma(receptor!+,ITAM1~U!1).A(State~SHP!1) ksbU,ksuU 
+  r20_SHP_binding_ITAM2_U: A(State~SHP) + Gamma(receptor!+,ITAM2~U) <-> Gamma(receptor!+,ITAM2~U!1).A(State~SHP!1) ksbU,ksuU 
+  r43_KP: Gamma(receptor!1).ligand(receptor!1) -> ligand(receptor) + Gamma(receptor) KPR 
+  r44_KP_adaptor_dephosph_pZAP_ITAM1: Gamma(receptor,ITAM1!1).A(State~PZAP!1) -> Gamma(receptor,ITAM1!1).A(State~UZAP!1) _rateLaw1 
+  r45_KP_adaptor_dephosph_pZAP_ITAM2: Gamma(receptor,ITAM2!1).A(State~PZAP!1) -> Gamma(receptor,ITAM2!1).A(State~UZAP!1) _rateLaw2 
+  r49_LRZ1_breaking_ITAM1: Gamma(receptor,ITAM1!1).A(State!1) -> A(State) + Gamma(receptor,ITAM1) kh 
+  r48_LRZ1_breaking_ITAM2: Gamma(receptor,ITAM2!1).A(State!1) -> A(State) + Gamma(receptor,ITAM2) kh 
+  r50_zeta_convert1: Gamma(receptor,ITAM1~PP) -> Gamma(receptor,ITAM1~U) kh 
+  r51_zeta_convert2: Gamma(receptor,ITAM2~PP) -> Gamma(receptor,ITAM2~U) kh 
+  r15_uSYK_binding_ITAM1: A(State~uSYK) + Gamma(receptor!+,ITAM1~U) <-> Gamma(receptor!+,ITAM1~U!1).A(State~uSYK!1) ksbss,ksu 
+  r16_uSYK_binding_ITAM2: A(State~uSYK) + Gamma(receptor!+,ITAM2~U) <-> Gamma(receptor!+,ITAM2~U!1).A(State~uSYK!1) ksbss,ksu 
+  r17_uSYK_binding_ITAM1PP: A(State~uSYK) + Gamma(receptor!+,ITAM1~PP) <-> Gamma(receptor!+,ITAM1~PP!1).A(State~uSYK!1) ksb,ksu 
+  r18_uSYK_binding_ITAM2PP: A(State~uSYK) + Gamma(receptor!+,ITAM2~PP) <-> Gamma(receptor!+,ITAM2~PP!1).A(State~uSYK!1) ksb,ksu 
+  r11_PSYK_binding_ITAM1: A(State~pSYK) + Gamma(receptor!+,ITAM1~U) <-> Gamma(receptor!+,ITAM1~U!1).A(State~pSYK!1) ksbss,ksu 
+  r12_PSYK_binding_ITAM2: A(State~pSYK) + Gamma(receptor!+,ITAM2~U) <-> Gamma(receptor!+,ITAM2~U!1).A(State~pSYK!1) ksbss,ksu 
+  r13_PSYK_binding_ITAM1PP: A(State~pSYK) + Gamma(receptor!+,ITAM1~PP) <-> Gamma(receptor!+,ITAM1~PP!1).A(State~pSYK!1) ksb,ksu 
+  r14_PSYK_binding_ITAM2PP: A(State~pSYK) + Gamma(receptor!+,ITAM2~PP) <-> Gamma(receptor!+,ITAM2~PP!1).A(State~pSYK!1) ksb,ksu 
+  r29_ITAM_bound_SYK_phosphorylation_by_LCK: A(State~uSYK!+) + LCK() -> A(State~pSYK!+) + LCK() kzp 
+  r23_uSYK_autophosphorylation: A(State~uSYK!+) -> A(State~pSYK!+) ksa 
+  r24_pSYK_transphosphorylation_uSYK: A(State~uSYK!+)%3 + A(State~pSYK!+)%4 -> A(State~pSYK!+)%3 + A(State~pSYK!+)%4 kst 
+  r25_pSYK_phosphorylating_self_ITAM1: Gamma(receptor!+,ITAM1~U!1).A(State~pSYK!1) -> Gamma(receptor!+,ITAM1~PP!1).A(State~pSYK!1) ksi 
+  r26_pSYK_phosphorylating_self_ITAM2: Gamma(receptor!+,ITAM2~U!1).A(State~pSYK!1) -> Gamma(receptor!+,ITAM2~PP!1).A(State~pSYK!1) ksi 
+  r30_ITAM_bound_uSYK_transphosphorylating_ITAM1: A(State~uSYK!+) + Gamma(receptor!+,ITAM1~U!?) -> A(State~uSYK!+) + Gamma(receptor!+,ITAM1~PP!?) ksil 
+  r31_ITAM_bound_uSYK_transphosphorylating_ITAM2: A(State~uSYK!+) + Gamma(receptor!+,ITAM2~U!?) -> A(State~uSYK!+) + Gamma(receptor!+,ITAM2~PP!?) ksil 
+  r27_pSYK_transphosphorylating_other_ITAM1: A(State~pSYK!+) + Gamma(receptor!+,ITAM1~U!?) -> A(State~pSYK!+) + Gamma(receptor!+,ITAM1~PP!?) ksih 
+  r28_pSYK_transphosphorylating_other_ITAM2: A(State~pSYK!+) + Gamma(receptor!+,ITAM2~U!?) -> A(State~pSYK!+) + Gamma(receptor!+,ITAM2~PP!?) ksih 
+  r42_free_SYK_dephosphorylation_SHP: A(State~SHP!+)%1 + A(State~pSYK)%2 -> A(State~SHP!+)%1 + A(State~uSYK)%2 ksd 
+  r33_bound_pSYK_dephosphorylation_by_SHP: A(State~SHP!+)%1 + A(State~pSYK!+)%2 -> A(State~SHP!+)%1 + A(State~uSYK!+)%2 ksd 
+  r46_KP_adaptor_dephosph_pSYK_ITAM1: Gamma(receptor,ITAM1!1).A(State~pSYK!1) -> Gamma(receptor,ITAM1!1).A(State~uSYK!1) _rateLaw3 
+  r47_KP_adaptor_dephosph_pSYK_ITAM2: Gamma(receptor,ITAM2!1).A(State~pSYK!1) -> Gamma(receptor,ITAM2!1).A(State~uSYK!1) _rateLaw4 
+  r37_bound_CBL_degrade_uZAP: A(State~UZAP!+) -> ligand(receptor) kdl 
+  r35_Free_pZAP_dephosph: A(State~PZAP) -> A(State~UZAP) kfd 
+  r36_Free_pSYK_dephosph: A(State~pSYK) -> A(State~uSYK) kfd 
+  r38_bound_CBL_degrade_pZAP: A(State~PZAP!+) -> ligand(receptor) kdl 
+  r39_bound_CBL_degrade_uSYK: A(State~uSYK!+) -> ligand(receptor) kdl 
+  r40_bound_CBL_degrade_pSYK: A(State~pSYK!+) -> ligand(receptor) kdl 
+end reaction rules
+
+end model
+
+simulate_nf({t_end=>266.0,n_steps=>2000})

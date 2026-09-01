@@ -1,0 +1,13 @@
+Optimization Results - 5 Parameters (C1, C2, g, k3, k4)
+Number of particles: 32
+Number of iterations: 100
+Optimization time: 14.85 minutes
+
+Optimized parameters (log10 space): [ 4.48568296 -0.51824242 -2.07623787 -1.29708632  0.49133804]
+C1_optimal = 3.059729e+04
+C2_optimal = 3.032198e-01
+g_optimal = 8.390003e-03
+k3_optimal = 5.045610e-02
+k4_optimal = 3.099831e+00
+Final residue = 414228977596.395325
+Residue^(1/4) = 802.250727

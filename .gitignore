@@ -1,0 +1,22 @@
+# Data files (belong on the cluster, not in git)
+*.fcs
+*.wsp
+*.pptx
+data/
+
+# Python cache
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Cluster job outputs
+slurm*.out
+*.log
+
+# macOS junk
+.DS_Store
+
+# BioNetGen outputs
+bng_output_*/
+*.gdat
+*.cdat
