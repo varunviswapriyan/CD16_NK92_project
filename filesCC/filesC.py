@@ -1,33 +1,29 @@
 """
-filesC.py -- Ca fitting, shared parameters, four modes. Pick modes on the CLI:
+filesC.py -- Ca fitting, shared parameters, four modes, fully self-contained.
 
-  raw     shared 5-param fit, plain SSR              (Indrani's requested config)
-  se      shared 5-param fit, SE-weighted (chi-sq)   (uses her SE columns)
-  syk     TWO-KINASE model from her JI paper: Ca driven by pZAP AND pSYK,
-          all params shared across conditions (6 params: C1Z, C1S, C2, g, k3, k4)
-  syk_se  two-kinase + SE-weighted
-
-Every mode: 4 independent PSO starts (48 particles x 150 iters) + L-BFGS-B +
-Nelder-Mead polish, best kept. Plots mean +/- SE in the c0x style. Each mode
-writes its own results_{mode}.json and plot, so modes can run as PARALLEL jobs
-without colliding.
+ONE COMMAND runs everything as four PARALLEL slurm jobs:
 
     cd ~/Ca_fit_c02
-    python ~/CD16_NK92_project/filesCC/filesC.py raw          # one mode
-    python ~/CD16_NK92_project/filesCC/filesC.py raw se syk   # several, sequential
+    python ~/CD16_NK92_project/filesCC/filesC.py submit
 
-The syk modes need a pSYK export next to the pZAP one:
-    optimized_model_pzap/model_output_psyk.csv  (columns time + mean_pSYK_{cond})
-Generate it from your existing exporter (observable pSYK_total exists in v69):
-    cd ~/NK92_fit_v69/estimate_params_pzap_cleaned_up
-    sed 's/pZAP/pSYK/g' export_pzap.py > export_psyk.py
-    python export_psyk.py 10 model_output_psyk.csv
-    cp model_output_psyk.csv ~/Ca_fit_c02/optimized_model_pzap/
-Outputs -> out_filesC/  Summary reports raw SSR for everything + gamma-peak gap
-in SE units (the number that decides whether the fit is 'good').
+That submits raw / se / syk / syk_se as separate 32-core jobs (each ~15-25 min,
+all running at once). The pSYK input needed by the syk modes is generated
+AUTOMATICALLY from the v69 BioNetGen .gdat outputs -- no manual export step.
+
+Modes (can also be run directly, e.g. `python filesC.py raw`):
+  raw     shared 5-param fit, plain SSR              (Indrani's requested config)
+  se      shared 5-param fit, SE-weighted (chi-sq)
+  syk     TWO-KINASE model (her JI structure): Ca driven by pZAP AND pSYK,
+          all params shared (6 params: C1, C1S, C2, g, k3, k4)
+  syk_se  two-kinase + SE-weighted
+
+Each mode: 4 PSO starts (48 particles x 150 iters) + L-BFGS-B + Nelder-Mead,
+best kept; plots mean +/- SE; writes its own results_{mode}.json (no clashes).
+Summary reports raw SSR (vs c02 = 8.402e4, Indrani = 8.9e4) and the gamma-peak
+gap in SE units -- the number that says whether the fit is actually good.
 """
 
-import os, sys, json, time
+import os, sys, json, time, glob, subprocess
 import numpy as np
 import pandas as pd
 from scipy.integrate import odeint
@@ -42,6 +38,9 @@ import matplotlib.pyplot as plt
 PZAP_PATH = 'optimized_model_pzap/model_output_pzap.csv'
 PSYK_PATH = 'optimized_model_pzap/model_output_psyk.csv'
 CA_PATH   = 'ca_data/Ca_NK92.csv'
+V69_DIR   = os.path.expanduser('~/NK92_fit_v69/estimate_params_pzap_cleaned_up')
+RUNS_MAP  = {'zeta': 'zeta_runs', 'gamma': 'gamma_runs', 'hetero': 'mixed_runs'}
+K_RECENT  = 10          # average the K most recent analysis dirs (best-fit sims)
 T0        = 30.0
 VE, Z     = 25.0, 602.0
 OUT_DIR   = 'out_filesC'
@@ -65,6 +64,54 @@ MODES = {
     'syk_se': dict(two_kinase=True,  weighted=True,  label='two-kinase (pZAP+pSYK), shared, SE-weighted'),
 }
 
+ENV_SETUP = ('module load Miniconda3/4.9.2; '
+             'source /gpfs0/scratch/miniforge3/24.11.2/etc/profile.d/conda.sh; '
+             'conda activate CD16_v2')
+
+# ---------------- auto-generate pSYK export from v69 .gdat files ----------------
+def _read_gdat_psyk(path):
+    try:
+        with open(path) as f:
+            header = f.readline()
+        names = header.lstrip('#').split()
+        arr = np.loadtxt(path, comments='#')
+        if arr.ndim != 2 or arr.shape[1] != len(names): return None, None
+        cols = {n: arr[:, i] for i, n in enumerate(names)}
+        t = cols.get('time')
+        if t is None: return None, None
+        if 'pSYK_total' in cols:
+            return t, cols['pSYK_total']
+        if 'pSYK_bound' in cols and 'pSYK_free' in cols:
+            return t, cols['pSYK_bound'] + cols['pSYK_free']
+        hit = next((n for n in names if 'pSYK' in n), None)
+        return (t, cols[hit]) if hit else (None, None)
+    except Exception:
+        return None, None
+
+
+def export_psyk():
+    print(f'Generating {PSYK_PATH} from v69 .gdat files...', flush=True)
+    series, tgrid = {}, None
+    for cond, sub in RUNS_MAP.items():
+        adirs = sorted(glob.glob(os.path.join(V69_DIR, sub, 'analysis*')),
+                       key=os.path.getmtime)[-K_RECENT:]
+        traces = []
+        for dd in adirs:
+            for g in glob.glob(os.path.join(dd, '**', '*.gdat'), recursive=True):
+                t, v = _read_gdat_psyk(g)
+                if t is not None: traces.append((t, v))
+        if not traces:
+            raise FileNotFoundError(
+                f'no usable .gdat with a pSYK observable under {V69_DIR}/{sub}/analysis*')
+        t0 = traces[0][0]
+        vals = [np.interp(t0, t, v) for t, v in traces]
+        series[cond] = np.mean(vals, axis=0); tgrid = t0
+        print(f'  {cond}: averaged {len(traces)} gdat trace(s) from {len(adirs)} analysis dir(s)', flush=True)
+    os.makedirs(os.path.dirname(PSYK_PATH), exist_ok=True)
+    pd.DataFrame({'time': tgrid,
+                  **{f'mean_pSYK_{c}': series[c] for c in CONDS}}).to_csv(PSYK_PATH, index=False)
+    print(f'  wrote {PSYK_PATH}', flush=True)
+
 # ---------------- ODEs ----------------
 def calcium(y, t, pzap, C1, C2, g, k3, k4, nn, be):
     # verbatim from fit_ca.py
@@ -78,15 +125,13 @@ def calcium(y, t, pzap, C1, C2, g, k3, k4, nn, be):
 
 
 def calcium2(y, t, pzap, psyk, C1, C1S, C2, g, k3, k4, nn, be):
-    # two-kinase extension of the same structure (her JI model: ZAP + SYK arms).
-    # Same Hill shape and gating; only the drive term gains a pSYK contribution.
+    # two-kinase extension, same structure (her JI model: ZAP + SYK arms)
     b, k1, k2 = 0.111, 0.7, 0.7
     s = k2 * k2
     ca, h = y
     FZ = (pzap ** nn / (pzap ** nn + k3 ** nn)) + (k4 * pzap)
     FS = (psyk ** nn / (psyk ** nn + k3 ** nn)) + (k4 * psyk)
-    drive = C1 * FZ + C1S * FS
-    dca = (h * drive) * (((b * k1) + ca) / (k1 + ca)) - (g * ca) + be
+    dca = (h * (C1 * FZ + C1S * FS)) * (((b * k1) + ca) / (k1 + ca)) - (g * ca) + be
     dh = (C2 * (FZ + FS)) * ((s / (s + ca ** 2)) - h)
     return [dca, dh]
 
@@ -117,13 +162,10 @@ def pick(df, cands):
 
 
 def load(need_syk):
+    if need_syk and not os.path.exists(PSYK_PATH):
+        export_psyk()
     ca_df = pd.read_csv(CA_PATH); pz_df = pd.read_csv(PZAP_PATH)
-    ps_df = None
-    if need_syk:
-        if not os.path.exists(PSYK_PATH):
-            raise FileNotFoundError(
-                f'{PSYK_PATH} not found -- generate it first (see header of this file)')
-        ps_df = pd.read_csv(PSYK_PATH)
+    ps_df = pd.read_csv(PSYK_PATH) if need_syk else None
     tc = pick(ca_df, ['time_seconds', 'time']); tp = pick(pz_df, ['time', 'time_seconds'])
     data = {}
     for k in CONDS:
@@ -253,11 +295,31 @@ def plot(mode, mode_cfg, x, data):
     fig.savefig(path, dpi=100); plt.close(fig)
     return path, ssr, p
 
+# ---------------- self-submitting parallel jobs ----------------
+def submit():
+    script = os.path.abspath(__file__)
+    os.makedirs('logs', exist_ok=True)
+    # generate the pSYK export ONCE up front so parallel jobs don't race
+    if not os.path.exists(PSYK_PATH):
+        export_psyk()
+    for m in MODES:
+        cmd = ['sbatch', '-J', f'fc_{m}', '-N1', '-n1', '-c', '32', '--mem=16G',
+               '-t', '4:00:00', '-o', f'logs/fc_{m}.log',
+               '--wrap', f'{ENV_SETUP}; cd {os.getcwd()}; python {script} {m}']
+        out = subprocess.run(cmd, capture_output=True, text=True)
+        print(f'{m}: {out.stdout.strip() or out.stderr.strip()}', flush=True)
+    print('\nAll four submitted. Check:  squeue -u $USER')
+    print('Progress:                  tail -f logs/fc_raw.log')
+    print('When done:                 grep "DONE\\|FAILED" logs/fc_*.log')
+
 
 def main():
     global DATA
+    args = sys.argv[1:]
+    if 'submit' in args:
+        submit(); return
     os.makedirs(OUT_DIR, exist_ok=True)
-    req = [a for a in sys.argv[1:] if a in MODES] or ['raw', 'se']
+    req = [a for a in args if a in MODES] or ['raw', 'se']
     need_syk = any(MODES[m]['two_kinase'] for m in req)
     print(f'modes: {req}', flush=True)
     DATA = load(need_syk)
