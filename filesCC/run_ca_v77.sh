@@ -60,11 +60,15 @@ def read(path, obs):
         a = np.loadtxt(path, comments='#')
         if a.ndim != 2 or a.shape[1] != len(names): return None, None
         c = {n: a[:, i] for i, n in enumerate(names)}
-        if 'time' not in c: return None, None
-        for k in (obs, 'pZAP_total', 'pZAP_bound'):
-            if k in c: return c['time'], c[k]
-        hit = next((n for n in names if 'pZAP' in n), None)
-        return (c['time'], c[hit]) if hit else (None, None)
+        tkey = next((n for n in names if n.lower() == 'time'), None)
+        if tkey is None: return None, None
+        low = {n.lower(): n for n in names}
+        for k in ('pzap_total', 'pzap_bound', 'pzap', 'pzap_free'):
+            if k in low: return c[tkey], c[low[k]]
+        hit = next((n for n in names if 'zap' in n.lower() and 'syk' not in n.lower()), None)
+        if hit is None:
+            print('    columns found:', names)
+        return (c[tkey], c[hit]) if hit else (None, None)
     except Exception:
         return None, None
 series, tg = {}, None
