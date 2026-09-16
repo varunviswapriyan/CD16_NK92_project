@@ -44,7 +44,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 # ---------------- config ----------------
-PZAP_PATH = 'optimized_model_pzap/model_output_pzap.csv'
+PZAP_PATH = os.environ.get('PZAP_OVERRIDE', 'optimized_model_pzap/model_output_pzap.csv')
 OBS_PATHS = {'pSYK_total': 'optimized_model_pzap/model_output_psyk.csv',
              'pSYK_bound': 'optimized_model_pzap/model_output_psykbound.csv',
              'bound_ZAP_SYK': 'optimized_model_pzap/model_output_boundzs.csv'}
@@ -53,7 +53,7 @@ V69_DIR   = os.path.expanduser('~/NK92_fit_v69/estimate_params_pzap_cleaned_up')
 RUNS_MAP  = {'zeta': 'zeta_runs', 'gamma': 'gamma_runs', 'hetero': 'mixed_runs'}
 K_RECENT  = 10
 T0, VE, Z = 30.0, 25.0, 602.0
-OUT_DIR   = 'out_filesB'
+OUT_DIR   = os.environ.get('OUT_OVERRIDE', 'out_filesB')
 ITAMS     = {'zeta': 6.0, 'gamma': 2.0, 'hetero': 4.0}
 
 LOG_BOUNDS = {'C1': [-2.0, 5.0], 'C2': [-3.0, 2.0], 'g': [-5.0, 0.0],
@@ -89,6 +89,7 @@ MODES = {
     'm11_h0':         dict(src='pzap', tr='none',    ode='h0',     extra=['h0']),
     'm12_itam_lin':   dict(src='pzap', tr='itam',    ode='linear', extra=[]),
     'm13_itam_iff':   dict(src='pzap', tr='itam',    ode='iff',    extra=['Ki']),
+    'c21_shared':     dict(src='pzap', tr='none',    ode='std',    extra=[]),
 }
 
 def pnames_for(cfg):
