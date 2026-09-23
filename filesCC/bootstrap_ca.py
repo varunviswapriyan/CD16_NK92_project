@@ -65,7 +65,7 @@ def load_base():
 
 def resample(base, seed):
     """Parametric bootstrap: y ~ Normal(mean, SE) at each timepoint."""
-    rng = np.random.default_rng(seed)
+    rng = np.random.RandomState(seed % (2**32 - 1))
     out = {}
     for k, d in base.items():
         y = rng.normal(d['mean'], np.maximum(d['se'], 1e-9))

@@ -55,11 +55,11 @@ def read_days():
 
 def resampled_means(days, kind, seed):
     """-> {line: array(4 timepoints)} of bootstrap means."""
-    rng = np.random.default_rng(seed)
+    rng = np.random.RandomState(seed % (2**32 - 1))
     out = {}
     for line, arr in days.items():
         if kind == 'emp':
-            idx = rng.integers(0, arr.shape[0], size=arr.shape[0])   # resample days
+            idx = rng.randint(0, arr.shape[0], size=arr.shape[0])    # resample days
             out[line] = arr[idx].mean(axis=0)
         else:                                                        # parametric
             mu = arr.mean(axis=0)
