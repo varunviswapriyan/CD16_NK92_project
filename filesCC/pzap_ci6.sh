@@ -119,6 +119,9 @@ hdr = '%-9s %10s %10s %10s %22s %6s %22s' % (
     'w', 'percentile CI')
 print(hdr); print('-' * len(hdr))
 
+# keep only replicates that reported every parameter, so all arrays align
+kept = [b for b in kept if all(n in b[1] for n in FIT6)] or kept
+
 summary, allv = {}, {}
 for n in FIT6:
     a = np.array([b[1][n] for b in kept if n in b[1]], float)
@@ -187,7 +190,8 @@ pairs = [('lig0', 'ZAP0'), ('ZAP0', 'SYK0'), ('ZAP0', 'KZP_MULT'),
 fig, axes = plt.subplots(1, len(pairs), figsize=(3.1 * len(pairs), 3.3))
 for ax, (x, y) in zip(np.atleast_1d(axes), pairs):
     ax_ = ax
-    if x not in allv or y not in allv: ax_.axis('off'); continue
+    if x not in allv or y not in allv or len(allv[x]) != len(allv[y]):
+        ax_.axis('off'); continue
     ax_.scatter(allv[x], allv[y], s=30, alpha=0.75, color='tab:blue')
     if ref:
         ax_.scatter([ref[1].get(x)], [ref[1].get(y)], marker='*', s=220,

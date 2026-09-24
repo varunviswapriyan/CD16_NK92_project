@@ -34,7 +34,11 @@ PIN = [x for x in os.environ.get('BOOT_PIN', '').split(',') if x]
 BOOT_ROOT = os.path.join(HOME, 'boot_pzap' + ('_pin' + '_'.join(PIN) if PIN else ''))
 MARKER   = 'pZAP70 (Tyr493)'
 # cell line in the xlsx  ->  column in data/pZAP70_Tyr493_mean.csv
-LINE2COL = {'NK92': 'mean_zeta', 'KI 1': 'mean_gamma', 'KI 2': 'mean_hetero'}
+#
+# VERIFIED against the shipped CSV (each column reproduces its line's 3-day mean
+# to <1e-6 at 60/120/300 s; the next-best line is off by 5-37%).  The parental
+# NK92 row feeds mean_NK92, which the fitting code does not read.
+LINE2COL = {'KI 1': 'mean_zeta', 'KI 2': 'mean_gamma', 'KI 6': 'mean_hetero'}
 DAYCOLS  = ['d_0', 'd_1', 'd_2', 'd_5']          # 0, 60, 120, 300 s -- the fitted points
 TIMES    = [0.0, 60.0, 120.0, 300.0]
 PARTICLES, ITERS = 16, 20                        # warm-started: short run is enough
@@ -98,9 +102,8 @@ def build_one(kind, i, days):
         'zeta_runs', 'gamma_runs', 'mixed_runs', '*.png', 'slurm*.out', '*.log'))
     d = os.path.join(dst, SUB)
 
-    if i == 0:                                     # reference: real 3-day means, no resampling
-        write_csv(os.path.join(d, 'data', 'pZAP70_Tyr493_mean.csv'),
-                  {line: arr.mean(axis=0) for line, arr in days.items()})
+    if i == 0:
+        pass                                       # reference: leave the shipped CSV exactly as-is
     else:
         write_csv(os.path.join(d, 'data', 'pZAP70_Tyr493_mean.csv'),
                   resampled_means(days, kind, seed=20260921 + (0 if kind == 'emp' else 5000) + i))
@@ -150,9 +153,36 @@ python pzap_param_estimation_NK92.py {PARTICLES} {ITERS}
     os.chmod(run, 0o755)
     return tag, run
 
+def verify_mapping(days):
+    """Abort unless each line's 3-day mean reproduces its CSV column.
+
+    This is the guard that was missing: a wrong line->column mapping silently
+    fits the model to scrambled data and shows up only as a hugely inflated SSR.
+    """
+    csv = os.path.join(SRC, SUB, 'data', 'pZAP70_Tyr493_mean.csv')
+    d = pd.read_csv(csv)
+    tcol = d.columns[0]
+    bad = []
+    for line, col in LINE2COL.items():
+        mu = days[line].mean(axis=0)
+        for t, v in zip(TIMES, mu):
+            row = d.loc[np.isclose(d[tcol].to_numpy(float), t), col]
+            if row.empty:
+                bad.append('%s: no row at t=%g' % (col, t)); continue
+            if abs(float(row.iloc[0]) - v) > 1e-4:
+                bad.append('%s @ %gs: csv=%.6f  xlsx-mean(%s)=%.6f'
+                           % (col, t, float(row.iloc[0]), line, v))
+    if bad:
+        print('ERROR: line -> column mapping does not reproduce the shipped CSV:')
+        for b in bad: print('   ' + b)
+        raise SystemExit('refusing to build bootstrap samples from a wrong mapping')
+    print('mapping verified: ' + ', '.join('%s -> %s' % (k, v) for k, v in LINE2COL.items()))
+
+
 def build(n_emp, n_par):
     os.makedirs(BOOT_ROOT, exist_ok=True)
     days = read_days()
+    verify_mapping(days)
     print('day-to-day spread per line (SD across 3 days, timepoints 0/1/2/5 min):')
     for line, arr in days.items():
         print(f'  {line:<6} mean={np.round(arr.mean(axis=0), 4)}  sd={np.round(arr.std(axis=0, ddof=1), 4)}')
