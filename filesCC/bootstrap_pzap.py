@@ -30,7 +30,8 @@ HOME     = os.path.expanduser('~')
 SRC      = os.path.join(HOME, 'NK92_fit_v77')
 SUB      = 'estimate_params_pzap_cleaned_up'
 XLSX     = '/home/gddaslab/share/Varun_Indrani/estimate_params_pzap/data/pZAP70_Tyr493_Tyr292_original_and_averages.xlsx'
-BOOT_ROOT = os.path.join(HOME, 'boot_pzap')
+PIN = [x for x in os.environ.get('BOOT_PIN', '').split(',') if x]
+BOOT_ROOT = os.path.join(HOME, 'boot_pzap' + ('_pin' + '_'.join(PIN) if PIN else ''))
 MARKER   = 'pZAP70 (Tyr493)'
 # cell line in the xlsx  ->  column in data/pZAP70_Tyr493_mean.csv
 LINE2COL = {'NK92': 'mean_zeta', 'KI 1': 'mean_gamma', 'KI 2': 'mean_hetero'}
@@ -46,7 +47,9 @@ V77 = {'lig0': 1.9329, 'kdl0': -2.5655, 'ZAP0': 2.1666, 'SYK0': 1.7237,
        'KZP_MULT': 0.3424, 'KPR_MULT': -0.2676}
 FIT6 = ['lig0', 'kdl0', 'ZAP0', 'SYK0', 'KZP_MULT', 'KPR_MULT']
 MULT_BOUNDS = {'KZP_MULT': (-0.3, 1.0), 'KPR_MULT': (-1.0, 1.0)}   # original v_config bounds
-HALF = 0.30                                       # warm-start half-width in log10
+HALF = float(os.environ.get('BOOT_HALF', '0.60'))  # warm-start half-width in log10
+ORIG_B = {'lig0': (1.4, 2.4), 'kdl0': (-4.5, -2.3), 'ZAP0': (2.0, 3.2),
+          'SYK0': (0.5, 2.5), 'KZP_MULT': (-0.3, 1.0), 'KPR_MULT': (-1.0, 1.0)}
 
 def read_days():
     """{line: DataFrame(3 days x 4 timepoints)} for the Tyr493 marker."""
@@ -95,8 +98,12 @@ def build_one(kind, i, days):
         'zeta_runs', 'gamma_runs', 'mixed_runs', '*.png', 'slurm*.out', '*.log'))
     d = os.path.join(dst, SUB)
 
-    write_csv(os.path.join(d, 'data', 'pZAP70_Tyr493_mean.csv'),
-              resampled_means(days, kind, seed=20260921 + (0 if kind == 'emp' else 5000) + i))
+    if i == 0:                                     # reference: real 3-day means, no resampling
+        write_csv(os.path.join(d, 'data', 'pZAP70_Tyr493_mean.csv'),
+                  {line: arr.mean(axis=0) for line, arr in days.items()})
+    else:
+        write_csv(os.path.join(d, 'data', 'pZAP70_Tyr493_mean.csv'),
+                  resampled_means(days, kind, seed=20260921 + (0 if kind == 'emp' else 5000) + i))
 
     cfgp = os.path.join(d, 'v_config.json')
     c = json.load(open(cfgp))
@@ -113,10 +120,14 @@ def build_one(kind, i, days):
     for n, v in V77.items():                       # warm start: narrow box, clipped to orig bounds
         if n in c['PARAMS']:
             j = c['PARAMS'].index(n)
-            lo, hi = MULT_BOUNDS.get(n, (-9.0, 9.0))
+            if n in PIN:                           # pinned: collapse the box to a point
+                c['LB'][j] = c['UB'][j] = round(v, 6)
+                continue
+            lo, hi = ORIG_B.get(n, MULT_BOUNDS.get(n, (-9.0, 9.0)))
             c['LB'][j] = round(max(lo, v - HALF), 4)
             c['UB'][j] = round(min(hi, v + HALF), 4)
-    c['NOTE'] = f'bootstrap {kind} sample {i} (6 fitted params, KZBG_FRAC=1)'
+    c['NOTE'] = ('bootstrap %s sample %d (KZBG_FRAC=1%s)'
+                 % (kind, i, ('; pinned ' + ','.join(PIN)) if PIN else ''))
     json.dump(c, open(cfgp, 'w'), indent=2)
     if i == 1:
         print(f'    [{kind}] PARAMS={c["PARAMS"]}')
@@ -146,8 +157,9 @@ def build(n_emp, n_par):
     for line, arr in days.items():
         print(f'  {line:<6} mean={np.round(arr.mean(axis=0), 4)}  sd={np.round(arr.std(axis=0, ddof=1), 4)}')
     jobs = []
-    for i in range(1, n_emp + 1): jobs.append(build_one('emp', i, days))
+    for i in range(0, n_emp + 1): jobs.append(build_one('emp', i, days))
     for i in range(1, n_par + 1): jobs.append(build_one('par', i, days))
+    if PIN: print(f'PINNED at v77 values (not fitted): {PIN}')
     print(f'\nbuilt {len(jobs)} sample directories under {BOOT_ROOT}')
     return jobs
 
@@ -205,34 +217,43 @@ def parse_result(d):
 def report():
     import matplotlib; matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    rows = {'emp': [], 'par': []}
+    rows = {'emp': [], 'par': []}; ref = {}
     for d in sorted(glob.glob(os.path.join(BOOT_ROOT, '*[0-9]'))):
         tag = os.path.basename(d); kind = tag[:3]
         if kind not in rows: continue
         r = parse_result(d)
-        if r:
-            merged = dict(r[1]); merged['_res'] = r[0]
-            rows[kind].append(merged)
-    pnames = FIT6
+        if not r: continue
+        merged = dict(r[1]); merged['_res'] = r[0]
+        if tag.endswith('000'): ref[kind] = merged            # un-jittered reference
+        else: rows[kind].append(merged)
+    pnames = [n for n in FIT6 if n not in PIN]
     allv = {}
     for kind in ('emp', 'par'):
         v = rows[kind]
         if not v:
             print(f'{kind}: no completed samples yet'); continue
+        res = np.array([s['_res'] for s in v if s.get('_res') is not None], float)
+        rr = ref.get(kind, {}).get('_res')
         print(f'\n=== pZAP bootstrap ({kind}), n={len(v)} ===')
-        print(f'{"param":<6} {"median":>12} {"2.5%":>12} {"97.5%":>12}   v77 point est')
-        print('-' * 70)
+        print('median SSR = %.4e' % np.median(res) + ('   reference (un-jittered) SSR = %.4e' % rr if rr else ''))
+        print(f'{"param":<9} {"median":>11} {"2.5%":>11} {"97.5%":>11} {"w":>6} {"ref fit":>10}  {"v77":>9}')
+        print('-' * 78)
         pt = {'lig0': 85.7, 'kdl0': 2.72e-3, 'ZAP0': 146.8, 'SYK0': 52.9,
               'KZP_MULT': 2.2, 'KPR_MULT': 0.54}
         for n in pnames:
             arr = np.array([s[n] for s in v if n in s], float)
             if arr.size == 0:
-                print(f'{n:<6} {"(not parsed in any sample)":>48}')
+                print(f'{n:<9} {"(not parsed in any sample)":>48}')
                 continue
             lo, med, hi = np.percentile(arr, [2.5, 50, 97.5])
             allv[(kind, n)] = arr
-            print(f'{n:<6} {med:>12.4g} {lo:>12.4g} {hi:>12.4g}   {pt[n]:.4g}')
-        print('-' * 70)
+            w = (hi - lo) / abs(med) if med else float('inf')
+            rv = ref.get(kind, {}).get(n)
+            rs = f'{rv:.4g}' if rv is not None else '-'
+            mark = '' if (rv is not None and lo <= rv <= hi) else ' *'
+            print(f'{n:<9} {med:>11.4g} {lo:>11.4g} {hi:>11.4g} {w:>6.2f} {rs:>10}{mark:<2} {pt[n]:>9.4g}')
+        print('-' * 78)
+        print('w = (97.5%-2.5%)/median.   * = reference fit falls OUTSIDE its own CI')
         print('KZP_MULT x 0.03 = kzp in (uM s)^-1   |   KPR_MULT x 0.01 = KPR in s^-1')
     if allv:
         ks = sorted({k for k, _ in allv})
@@ -247,8 +268,29 @@ def report():
                 ax.axvline(lo, color='k', ls='--'); ax.axvline(hi, color='k', ls='--')
                 ax.set_title(f'{kind} {n}\n[{lo:.3g}, {hi:.3g}]', fontsize=9)
         fig.tight_layout()
-        p = os.path.join(BOOT_ROOT, 'ci_hist_pzap.png'); fig.savefig(p, dpi=110)
+        p = os.path.join(BOOT_ROOT, 'ci_hist_pzap.png'); fig.savefig(p, dpi=110); plt.close(fig)
         print(f'\nhistograms: {p}')
+
+        pairs = [('lig0','ZAP0'), ('ZAP0','SYK0'), ('ZAP0','KZP_MULT'),
+                 ('lig0','KZP_MULT'), ('kdl0','KPR_MULT'), ('SYK0','KZP_MULT')]
+        fig, axes = plt.subplots(len(ks), len(pairs),
+                                 figsize=(3.0*len(pairs), 3.0*len(ks)), squeeze=False)
+        for r, kind in enumerate(ks):
+            for c, (a1, a2) in enumerate(pairs):
+                ax = axes[r][c]
+                x, y = allv.get((kind, a1)), allv.get((kind, a2))
+                if x is None or y is None or len(x) != len(y): ax.axis('off'); continue
+                ax.scatter(x, y, s=28, alpha=0.75, color='tab:blue')
+                rf = ref.get(kind, {})
+                if a1 in rf and a2 in rf:
+                    ax.scatter([rf[a1]], [rf[a2]], marker='*', s=200, color='tab:red', zorder=5)
+                ax.set_xlabel(a1, fontsize=8); ax.set_ylabel(a2, fontsize=8)
+                ax.set_title(f'{kind}', fontsize=8)
+        fig.suptitle('pZAP bootstrap pairwise (red star = reference fit); '
+                     'a tilted line means only the combination is constrained', fontsize=10)
+        fig.tight_layout(rect=[0,0,1,0.95])
+        p2 = os.path.join(BOOT_ROOT, 'ci_pairs_pzap.png'); fig.savefig(p2, dpi=110); plt.close(fig)
+        print(f'pairwise:   {p2}')
 
 if __name__ == '__main__':
     a = sys.argv[1:]
