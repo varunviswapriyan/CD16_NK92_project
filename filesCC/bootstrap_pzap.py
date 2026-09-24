@@ -187,12 +187,14 @@ def parse_result(d):
              (header is not None and hvals is None and s.startswith('-')):
             try: hvals = [float(x) for x in s.split()]
             except Exception: pass
-    if not vals and header and hvals:              # fall back to the log10 row
+    merged = {}
+    if header and hvals:                           # log10 row first
         for k, v in zip(header, hvals):
             if k in FIT6:
-                vals[k] = 10.0 ** v
-    if not vals: return None
-    return res, vals
+                merged[k] = 10.0 ** v
+    merged.update(vals)                            # linear line wins where present
+    if not merged: return None
+    return res, merged
 
 def report():
     import matplotlib; matplotlib.use('Agg')
@@ -218,7 +220,9 @@ def report():
               'KZP_MULT': 2.2, 'KPR_MULT': 0.54}
         for n in pnames:
             arr = np.array([s[n] for s in v if n in s], float)
-            if arr.size == 0: continue
+            if arr.size == 0:
+                print(f'{n:<6} {"(not parsed in any sample)":>48}')
+                continue
             lo, med, hi = np.percentile(arr, [2.5, 50, 97.5])
             allv[(kind, n)] = arr
             print(f'{n:<6} {med:>12.4g} {lo:>12.4g} {hi:>12.4g}   {pt[n]:.4g}')
@@ -226,7 +230,8 @@ def report():
         print('KZP_MULT x 0.03 = kzp in (uM s)^-1   |   KPR_MULT x 0.01 = KPR in s^-1')
     if allv:
         ks = sorted({k for k, _ in allv})
-        fig, axes = plt.subplots(len(ks), 4, figsize=(16, 4 * len(ks)), squeeze=False)
+        ncol = len(pnames)
+        fig, axes = plt.subplots(len(ks), ncol, figsize=(3.2 * ncol, 3.6 * len(ks)), squeeze=False)
         for r, kind in enumerate(ks):
             for c, n in enumerate(pnames):
                 ax = axes[r][c]; arr = allv.get((kind, n))
