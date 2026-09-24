@@ -1,6 +1,9 @@
 """
-bootstrap_pzap.py -- bootstrap CIs for the pZAP fit (v77: KZBG_FRAC removed,
-kzp/KPR fixed at the approved values, 4 fitted params lig0/kdl0/ZAP0/SYK0).
+bootstrap_pzap.py -- bootstrap CIs for the pZAP fit, 6 FITTED parameters:
+lig0, kdl0, ZAP0, SYK0, KZP_MULT, KPR_MULT.  KZBG_FRAC stays removed (=1).
+Indrani approved estimating kzp ("not experimentally measured ... you can
+estimate this parameter") and accepted the fitted KPR, so both are fitted here
+and get their own CIs.
 
 Two bootstrap flavours, both resampling the EXPERIMENTAL data and refitting:
 
@@ -37,8 +40,12 @@ PARTICLES, ITERS = 16, 20                        # warm-started: short run is en
 ENV = ('module load Miniconda3/4.9.2; '
        'source /gpfs0/scratch/miniforge3/24.11.2/etc/profile.d/conda.sh; conda activate CD16_v2')
 
-# v77 optimum (log10): lig0, kdl0, ZAP0, SYK0
-V77 = {'lig0': 1.9329, 'kdl0': -2.5655, 'ZAP0': 2.1666, 'SYK0': 1.7237}
+# warm-start centres (log10). lig0..SYK0 from v77; multipliers from the v69 fit
+# that produced the approved values (KZP_MULT=2.2 -> 0.3424, KPR_MULT=0.54 -> -0.2676)
+V77 = {'lig0': 1.9329, 'kdl0': -2.5655, 'ZAP0': 2.1666, 'SYK0': 1.7237,
+       'KZP_MULT': 0.3424, 'KPR_MULT': -0.2676}
+FIT6 = ['lig0', 'kdl0', 'ZAP0', 'SYK0', 'KZP_MULT', 'KPR_MULT']
+MULT_BOUNDS = {'KZP_MULT': (-0.3, 1.0), 'KPR_MULT': (-1.0, 1.0)}   # original v_config bounds
 HALF = 0.30                                       # warm-start half-width in log10
 
 def read_days():
@@ -93,12 +100,27 @@ def build_one(kind, i, days):
 
     cfgp = os.path.join(d, 'v_config.json')
     c = json.load(open(cfgp))
-    for n, v in V77.items():                       # warm start: narrow box around v77
+    c.setdefault('FIXED', {})
+    for n in ('KZP_MULT', 'KPR_MULT'):             # fit them instead of holding fixed
+        c['FIXED'].pop(n, None)
+        if n not in c['PARAMS']:
+            lo, hi = MULT_BOUNDS[n]
+            c['PARAMS'].append(n); c['LB'].append(lo); c['UB'].append(hi)
+    c['FIXED']['KZBG_FRAC'] = 1.0                  # stays removed
+    if 'KZBG_FRAC' in c['PARAMS']:
+        j = c['PARAMS'].index('KZBG_FRAC')
+        for k in ('PARAMS', 'LB', 'UB'): c[k].pop(j)
+    for n, v in V77.items():                       # warm start: narrow box, clipped to orig bounds
         if n in c['PARAMS']:
             j = c['PARAMS'].index(n)
-            c['LB'][j] = round(v - HALF, 4); c['UB'][j] = round(v + HALF, 4)
-    c['NOTE'] = f'bootstrap {kind} sample {i} (KZBG_FRAC=1, kzp/KPR fixed)'
+            lo, hi = MULT_BOUNDS.get(n, (-9.0, 9.0))
+            c['LB'][j] = round(max(lo, v - HALF), 4)
+            c['UB'][j] = round(min(hi, v + HALF), 4)
+    c['NOTE'] = f'bootstrap {kind} sample {i} (6 fitted params, KZBG_FRAC=1)'
     json.dump(c, open(cfgp, 'w'), indent=2)
+    if i == 1:
+        print(f'    [{kind}] PARAMS={c["PARAMS"]}')
+        print(f'    [{kind}] FIXED={c["FIXED"]}')
 
     run = os.path.join(BOOT_ROOT, f'run_{tag}.sh')
     with open(run, 'w') as f:
@@ -163,7 +185,7 @@ def report():
         if kind not in rows: continue
         r = parse_result(d)
         if r: rows[kind].append(r[1] | {'_res': r[0]})
-    pnames = ['lig0', 'kdl0', 'ZAP0', 'SYK0']
+    pnames = FIT6
     allv = {}
     for kind in ('emp', 'par'):
         v = rows[kind]
@@ -172,7 +194,8 @@ def report():
         print(f'\n=== pZAP bootstrap ({kind}), n={len(v)} ===')
         print(f'{"param":<6} {"median":>12} {"2.5%":>12} {"97.5%":>12}   v77 point est')
         print('-' * 70)
-        pt = {'lig0': 85.7, 'kdl0': 2.72e-3, 'ZAP0': 146.8, 'SYK0': 52.9}
+        pt = {'lig0': 85.7, 'kdl0': 2.72e-3, 'ZAP0': 146.8, 'SYK0': 52.9,
+              'KZP_MULT': 2.2, 'KPR_MULT': 0.54}
         for n in pnames:
             arr = np.array([s[n] for s in v if n in s], float)
             if arr.size == 0: continue
@@ -180,6 +203,7 @@ def report():
             allv[(kind, n)] = arr
             print(f'{n:<6} {med:>12.4g} {lo:>12.4g} {hi:>12.4g}   {pt[n]:.4g}')
         print('-' * 70)
+        print('KZP_MULT x 0.03 = kzp in (uM s)^-1   |   KPR_MULT x 0.01 = KPR in s^-1')
     if allv:
         ks = sorted({k for k, _ in allv})
         fig, axes = plt.subplots(len(ks), 4, figsize=(16, 4 * len(ks)), squeeze=False)
