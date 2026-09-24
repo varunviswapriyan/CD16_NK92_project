@@ -20,6 +20,8 @@ Variants (all shared across adaptors, per-ITAM input, her ODE):
   Sfix      C1 C2 g k3 k4          S fixed (her 5 params, scale calibrated)
   min4      C1 C2 g k4             k3 and S both fixed
   min4h     C1 C2 g k3             k4 = 0 and S fixed
+  lin1      C1 C2 g S              linear drive, k4 = 1 (C1 carries the gain)
+  lin1S     C1 C2 g                same, S also fixed
 
     cd ~/Ca_fit_c02
     python .../bootstrap_ca2.py submit              # all variants, 12 samples each
@@ -61,6 +63,11 @@ VARIANTS = {
     'Sfix':     dict(fit=['C1','C2','g','k3','k4'],     fix={'S': N01['S']},         hill=True,  lin=True),
     'min4':     dict(fit=['C1','C2','g','k4'],          fix={'k3': N01['k3'], 'S': N01['S']}, hill=True, lin=True),
     'min4h':    dict(fit=['C1','C2','g','k3'],          fix={'k4': 0.0, 'S': N01['S']},       hill=True, lin=False),
+    # --- identifiable re-parameterisations of the linear-drive model ---
+    # F = k4*z enters as C1*h*k4*z, so C1 and k4 are only ever multiplied.
+    # Fix k4 = 1 and let C1 carry the coupling: same model, same curves, no valley.
+    'lin1':     dict(fit=['C1','C2','g','S'],           fix={'k4': 1.0},             hill=False, lin=True),
+    'lin1S':    dict(fit=['C1','C2','g'],               fix={'k4': 1.0, 'S': 31.5},  hill=False, lin=True),
 }
 
 N_STARTS, PARTICLES, ITERS = 2, 30, 90
@@ -278,8 +285,14 @@ if __name__ == '__main__':
     if not a: print(__doc__); sys.exit(0)
     if a[0] == 'submit':
         n = int(a[1]) if len(a) > 1 and a[1].isdigit() else 12
-        vs = [x for x in a[1:] if x in VARIANTS] or list(VARIANTS)
-        submit(n, vs)
+        named = [x for x in a[1:] if not x.isdigit()]
+        bad = [x for x in named if x not in VARIANTS]
+        if bad:
+            print('ERROR: unknown variant(s): ' + ', '.join(bad))
+            print('known: ' + ' '.join(VARIANTS))
+            print('(is this copy of the script up to date?)')
+            sys.exit(1)
+        submit(n, named or list(VARIANTS))
     elif a[0] == 'report': report()
     elif a[0] == 'band':   band(a[1] if len(a) > 1 else 'k3fix')
     elif a[0] in VARIANTS: run_sample(a[0], int(a[1]) if len(a) > 1 else 1)
