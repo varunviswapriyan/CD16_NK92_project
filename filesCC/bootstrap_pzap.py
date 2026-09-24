@@ -184,7 +184,9 @@ def report():
         tag = os.path.basename(d); kind = tag[:3]
         if kind not in rows: continue
         r = parse_result(d)
-        if r: rows[kind].append(r[1] | {'_res': r[0]})
+        if r:
+            merged = dict(r[1]); merged['_res'] = r[0]
+            rows[kind].append(merged)
     pnames = FIT6
     allv = {}
     for kind in ('emp', 'par'):
