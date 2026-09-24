@@ -159,22 +159,40 @@ def submit(n_emp, n_par):
     print('\nsqueue -u $USER    |    later: python ' + os.path.abspath(__file__) + ' report')
 
 def parse_result(d):
-    """Read fitted values out of a finished sample directory."""
+    """Read fitted values out of a finished sample directory.
+
+    analysis_param_residue.dat ends with a 'linear' line giving the parameters
+    already converted out of log10, e.g.
+      linear  lig0=63.86  kdl0=0.002986  ZAP0=274.6  SYK0=63.55 ...
+    """
     dat = os.path.join(d, SUB, 'analysis_param_residue.dat')
     if not os.path.exists(dat): return None
-    names, vals, res = None, None, None
+    res, vals = None, {}
+    header, hvals = None, None
     for ln in open(dat, errors='ignore'):
         s = ln.strip()
-        if s.lower().startswith('residue ='):
-            try: res = float(s.split('=')[1])
+        low = s.lower()
+        if low.startswith('residue ='):
+            try: res = float(s.split('=', 1)[1])
             except Exception: pass
-        elif ('lig0' in s or 'kdl0' in s) and '\t' in s:
-            names = s.split('\t')
-        elif names and vals is None:
-            try: vals = [float(x) for x in s.split('\t')[:len(names)]]
+        elif low.startswith('linear'):
+            for tok in s.split()[1:]:
+                if '=' in tok:
+                    k, v = tok.split('=', 1)
+                    try: vals[k.strip()] = float(v)
+                    except Exception: pass
+        elif header is None and s.startswith('lig0'):
+            header = s.split()
+        elif header is not None and hvals is None and s and s[0].isdigit() or \
+             (header is not None and hvals is None and s.startswith('-')):
+            try: hvals = [float(x) for x in s.split()]
             except Exception: pass
-    if not names or not vals: return None
-    return res, {n.strip(): 10.0 ** v if abs(v) < 10 else v for n, v in zip(names, vals)}
+    if not vals and header and hvals:              # fall back to the log10 row
+        for k, v in zip(header, hvals):
+            if k in FIT6:
+                vals[k] = 10.0 ** v
+    if not vals: return None
+    return res, vals
 
 def report():
     import matplotlib; matplotlib.use('Agg')
