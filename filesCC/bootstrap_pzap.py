@@ -158,6 +158,12 @@ def submit(n_emp, n_par):
         print(f'{tag}: {out.stdout.strip()}', flush=True)
     print('\nsqueue -u $USER    |    later: python ' + os.path.abspath(__file__) + ' report')
 
+def _norm(k):
+    """kd10 (digit one) and kdl0 (letter L) are the same parameter."""
+    k = k.strip()
+    return 'kdl0' if k.lower() in ('kd10', 'kdl0') else k
+
+
 def parse_result(d):
     """Read fitted values out of a finished sample directory.
 
@@ -179,7 +185,7 @@ def parse_result(d):
             for tok in s.split()[1:]:
                 if '=' in tok:
                     k, v = tok.split('=', 1)
-                    try: vals[k.strip()] = float(v)
+                    try: vals[_norm(k)] = float(v)
                     except Exception: pass
         elif header is None and s.startswith('lig0'):
             header = s.split()
@@ -190,8 +196,8 @@ def parse_result(d):
     merged = {}
     if header and hvals:                           # log10 row first
         for k, v in zip(header, hvals):
-            if k in FIT6:
-                merged[k] = 10.0 ** v
+            if _norm(k) in FIT6:
+                merged[_norm(k)] = 10.0 ** v
     merged.update(vals)                            # linear line wins where present
     if not merged: return None
     return res, merged
