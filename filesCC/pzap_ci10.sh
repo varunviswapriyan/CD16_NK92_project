@@ -235,10 +235,14 @@ fi
 # before they cost a run each.
 NN="${1:-7}"
 
-OLD=$(squeue -u "$USER" -h -o "%i %j" | awk '$2 ~ /^bp/ {print $1}')
-if [ -n "$OLD" ]; then
-  echo "$OLD" | xargs -r scancel
-  echo "cancelled $(echo "$OLD" | grep -c .) old pZAP bootstrap jobs"
+if [ -z "$BOOT_NOCANCEL" ]; then
+  OLD=$(squeue -u "$USER" -h -o "%i %j" | awk '$2 ~ /^bp/ {print $1}')
+  if [ -n "$OLD" ]; then
+    echo "$OLD" | xargs -r scancel
+    echo "cancelled $(echo "$OLD" | grep -c .) old pZAP bootstrap jobs"
+  fi
+else
+  echo "(leaving other pZAP jobs alone -- BOOT_NOCANCEL set)"
 fi
 [ "$BOOT_RESUME" = "1" ] || rm -rf $ROOT   # 300 s results untouched either way
 

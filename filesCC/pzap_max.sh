@@ -42,15 +42,20 @@ if [ "$1" = "report" ]; then
   exit 0
 fi
 
-OLD=$(squeue -u "$USER" -h -o "%i %j" | awk '$2 ~ /^bp/ {print $1}')
-[ -n "$OLD" ] && { echo "$OLD" | xargs -r scancel; echo "cleared queue"; sleep 2; }
+# clear the queue ONCE here; the arms are told not to (they would kill each other)
+if [ "$1" != "add" ]; then
+  OLD=$(squeue -u "$USER" -h -o "%i %j" | awk '$2 ~ /^bp/ {print $1}')
+  [ -n "$OLD" ] && { echo "$OLD" | xargs -r scancel; echo "cleared queue"; sleep 2; }
+else
+  echo "add mode: existing pZAP jobs are left running"
+fi
 
 echo "################  ARM A2 -- 300 s, N_REPS=16, box 0.35  ################"
-BOOT_TAG=_n16 BOOT_NREPS=16 BOOT_ITERS=16 BOOT_HALF=0.35 bash $F/pzap_ci6.sh
+BOOT_NOCANCEL=1 BOOT_TAG=_n16 BOOT_NREPS=16 BOOT_ITERS=16 BOOT_HALF=0.35 bash $F/pzap_ci6.sh
 
 echo
 echo "################  ARM B -- 600 s, 10-minute point  ################"
-bash $F/pzap_ci10.sh
+BOOT_NOCANCEL=1 bash $F/pzap_ci10.sh
 
 echo
 echo "Both submitted.  arm A2 ~8 h, arm B ~4 h.   squeue -u \$USER"
