@@ -77,6 +77,29 @@ def canon(n):
     n = n.strip()
     return 'kdl0' if n.lower() in ('kd10', 'kdl0') else n
 
+# Optional override of the warm-start / pin centres, in log10, e.g.
+#   BOOT_CENTRE="SYK0=1.5654,ZAP0=2.2380"
+# This matters for pinning tests: pinning a parameter at a value that was
+# optimal for a DIFFERENT model (the 4-parameter v77) makes the fit worse for
+# a reason that has nothing to do with whether the parameter is redundant.
+# Pin at the CURRENT 6-parameter point estimate instead.
+_CENTRE_SRC = {}
+for _kv in os.environ.get('BOOT_CENTRE', '').split(','):
+    if '=' in _kv:
+        _k, _v = _kv.split('=', 1)
+        _k = canon(_k)
+        if _k not in V77:
+            raise SystemExit('BOOT_CENTRE: unknown parameter %r (known: %s)'
+                             % (_k, sorted(V77)))
+        try:
+            V77[_k] = float(_v)
+        except ValueError:
+            raise SystemExit('BOOT_CENTRE: %r is not a number for %s' % (_v, _k))
+        _CENTRE_SRC[_k] = float(_v)
+if _CENTRE_SRC:
+    print('centre overrides (log10): %s'
+          % ', '.join('%s=%g' % (k, v) for k, v in sorted(_CENTRE_SRC.items())))
+
 
 def read_days():
     """{line: DataFrame(3 days x 4 timepoints)} for the Tyr493 marker."""
