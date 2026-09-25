@@ -6,8 +6,16 @@
 #    June). You can use 3 data points for each timepoint (0, 1 min, 2 min and
 #    5 min) to calculate bootstrapped mean to calculate CI."
 #
-#   bash ~/CD16_NK92_project/filesCC/pzap_ci6.sh          # 10 bootstrap + 1 ref + 4 null
-#   bash ~/CD16_NK92_project/filesCC/pzap_ci6.sh report
+#   bash ~/CD16_NK92_project/filesCC/pzap_ci10.sh          # 10 bootstrap + 1 ref + 4 null
+#   bash ~/CD16_NK92_project/filesCC/pzap_ci10.sh report
+#
+# SAME statistics as pzap_ci6.sh, but the fit window runs to 600 s so the
+# 10-minute data is included: 12 informative points instead of 9 for the same 6
+# parameters.  That extra third of the data sits in the 5-10 min decay, which is
+# exactly what kd10 (Cbl-b) and KPR control -- two of the three widest CIs.
+# Output goes to ~/boot_pzap_t600, so the 300 s results stay intact for
+# comparison.  If the model cannot reach the 10-minute point, the reference SSR
+# and the per-day SSRs will show it and you keep the 300 s answer.
 #
 # THE BOOTSTRAP IS EXACT, NOT SAMPLED.  Resampling 3 days with replacement has
 # exactly 10 distinct outcomes, with known probabilities (1, 3, 3, 3, 6, 3, 1,
@@ -36,17 +44,18 @@
 set -e
 F=~/CD16_NK92_project/filesCC
 unset BOOT_PIN
+export BOOT_TMAX=${BOOT_TMAX:-600}        # fit 0/1/2/5/10 min -- 12 informative points, not 9
 export BOOT_HALF=${BOOT_HALF:-0.25}
 export BOOT_PARTICLES=${BOOT_PARTICLES:-24}
-export BOOT_ITERS=${BOOT_ITERS:-20}        # fewer iterations, bought back as replicates below
-export BOOT_NREPS=${BOOT_NREPS:-6}         # was 3: halves the objective's noise variance
-ROOT=~/boot_pzap${BOOT_TAG}
+export BOOT_ITERS=${BOOT_ITERS:-18}        # simulating to 600 s costs ~2x per evaluation
+export BOOT_NREPS=${BOOT_NREPS:-4}         # traded down to keep the job near 4 h
+ROOT=~/boot_pzap_t600${BOOT_TAG}
 PY=$(command -v python3 || command -v python)   # login nodes have python3, not always python
 if [ -z "$PY" ]; then echo "no python found on PATH"; exit 1; fi
 
 # ----------------------------------------------------------------- report ----
 if [ "$1" = "report" ]; then
-ROOT="$ROOT" "$PY" - <<'PY'
+ROOT="$ROOT" BOOT_TMAX="$BOOT_TMAX" "$PY" - <<'PY'
 import os, glob, json
 import numpy as np
 from itertools import combinations_with_replacement
@@ -231,7 +240,7 @@ if [ -n "$OLD" ]; then
   echo "$OLD" | xargs -r scancel
   echo "cancelled $(echo "$OLD" | grep -c .) old pZAP bootstrap jobs"
 fi
-[ "$BOOT_RESUME" = "1" ] || rm -rf $ROOT
+[ "$BOOT_RESUME" = "1" ] || rm -rf $ROOT   # 300 s results untouched either way
 
 echo "== 1/3  building 1 reference + 10 day-sets + $NN null =="
 # in resume mode the surviving run scripts must go, or completed samples
@@ -241,7 +250,7 @@ rm -f $ROOT/run_*.sh 2>/dev/null || true
 
 echo
 echo "== 2/3  verifying every sample against an independent recomputation =="
-if ! "$PY" $F/verify_boot.py "$ROOT"; then
+if ! BOOT_TMAX="$BOOT_TMAX" "$PY" $F/verify_boot.py "$ROOT"; then
   echo
   echo "ABORTED -- nothing submitted.  Fix the mismatch above first."
   exit 1

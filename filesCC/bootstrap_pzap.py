@@ -33,7 +33,21 @@ SRC      = os.path.join(HOME, 'NK92_fit_v77')
 SUB      = 'estimate_params_pzap_cleaned_up'
 XLSX     = '/home/gddaslab/share/Varun_Indrani/estimate_params_pzap/data/pZAP70_Tyr493_Tyr292_original_and_averages.xlsx'
 PIN = [x for x in os.environ.get('BOOT_PIN', '').split(',') if x]
-BOOT_ROOT = os.path.join(HOME, 'boot_pzap' + ('_pin' + '_'.join(PIN) if PIN else ''))
+# Fitting window.  300 s = Indrani's original target (0/1/2/5 min).  600 s adds
+# the 10-minute point, which exists in the workbook but was never put into the
+# CSV.  The 15-minute point is 59% relative SE and 30 minutes goes negative, so
+# neither is offered.
+TMAX = float(os.environ.get('BOOT_TMAX', '300'))
+if TMAX >= 600:
+    DAYCOLS = ['d_0', 'd_1', 'd_2', 'd_5', 'd_10']
+    TIMES   = [0.0, 60.0, 120.0, 300.0, 600.0]
+else:
+    DAYCOLS = ['d_0', 'd_1', 'd_2', 'd_5']
+    TIMES   = [0.0, 60.0, 120.0, 300.0]
+BOOT_ROOT = os.path.join(HOME, 'boot_pzap'
+                         + ('_t%d' % int(TMAX) if TMAX != 300 else '')
+                         + os.environ.get('BOOT_TAG', '')      # keep older runs intact
+                         + ('_pin' + '_'.join(PIN) if PIN else ''))
 MARKER   = 'pZAP70 (Tyr493)'
 # cell line in the xlsx  ->  column in data/pZAP70_Tyr493_mean.csv
 #
@@ -41,8 +55,8 @@ MARKER   = 'pZAP70 (Tyr493)'
 # to <1e-6 at 60/120/300 s; the next-best line is off by 5-37%).  The parental
 # NK92 row feeds mean_NK92, which the fitting code does not read.
 LINE2COL = {'KI 1': 'mean_zeta', 'KI 2': 'mean_gamma', 'KI 6': 'mean_hetero'}
-DAYCOLS  = ['d_0', 'd_1', 'd_2', 'd_5']          # 0, 60, 120, 300 s -- the fitted points
-TIMES    = [0.0, 60.0, 120.0, 300.0]
+EXTRACOL = {'NK92': 'mean_NK92'}                 # present in the CSV, not read by the fit
+
 PARTICLES = int(os.environ.get('BOOT_PARTICLES', '16'))   # PSO swarm size
 ITERS     = int(os.environ.get('BOOT_ITERS', '20'))       # PSO iterations
 ENV = ('module load Miniconda3/4.9.2; '
@@ -69,7 +83,7 @@ def read_days():
     d = pd.read_excel(XLSX, sheet_name='Original_values')
     d = d[d['marker'].astype(str).str.strip() == MARKER]
     out = {}
-    for line in LINE2COL:
+    for line in list(LINE2COL) + list(EXTRACOL):
         sub = d[d['line'].astype(str).str.strip() == line]
         if sub.shape[0] != 3:
             raise SystemExit(f'ERROR: expected 3 days for {line}, found {sub.shape[0]}')
@@ -111,16 +125,34 @@ def resampled_means(days, kind, seed, i=1):
     return out
 
 def write_csv(path, means):
-    """Same columns/rows as the original data/pZAP70_Tyr493_mean.csv."""
-    orig = pd.read_csv(path)
-    df = orig.copy()
+    """Write the resampled means, adding timepoint rows that do not yet exist."""
+    df = pd.read_csv(path)
     tcol = df.columns[0]
-    for line, col in LINE2COL.items():
+    for t in TIMES:                                 # ensure a row exists per fitted time
+        if not np.any(np.isclose(df[tcol].to_numpy(float), t)):
+            blank = {c: (t if c == tcol else 0.0) for c in df.columns}
+            df = pd.concat([df, pd.DataFrame([blank])], ignore_index=True)
+    df = df.sort_values(tcol).reset_index(drop=True)
+    for line, col in list(LINE2COL.items()) + list(EXTRACOL.items()):
         if col not in df.columns:
-            raise SystemExit(f'ERROR: {col} not in {path} (cols={list(df.columns)})')
+            if line in LINE2COL:
+                raise SystemExit(f'ERROR: {col} not in {path} (cols={list(df.columns)})')
+            continue
         for t, v in zip(TIMES, means[line]):
             df.loc[np.isclose(df[tcol].to_numpy(float), t), col] = v
     df.to_csv(path, index=False)
+
+def has_result(tag):
+    """True if this sample already holds a finished 6-parameter fit."""
+    p = os.path.join(BOOT_ROOT, tag, SUB, 'analysis_param_residue.dat')
+    if not os.path.exists(p):
+        return False
+    for ln in open(p, errors='ignore'):
+        if ln.strip().lower().startswith('linear'):
+            got = {canon(t.split('=', 1)[0]) for t in ln.split()[1:] if '=' in t}
+            return all(n in got for n in FIT6)
+    return False
+
 
 def build_one(kind, i, days):
     tag = f'{kind}{i:03d}'
@@ -134,14 +166,27 @@ def build_one(kind, i, days):
     d = os.path.join(dst, SUB)
 
     if i == 0 or kind == 'nul':
-        # reference AND null samples both use the shipped CSV untouched.  A null
-        # differs from the reference only in the optimizer's own randomness, so
-        # the spread across nulls is pure simulation/optimizer noise.
-        pass
+        # Reference and null samples use the REAL (un-resampled) means.  At the
+        # 300 s window that is exactly the shipped CSV, so it is left alone; at
+        # 600 s the shipped CSV has no 10-minute row, so it is written from the
+        # true 3-day means.
+        if TMAX != 300:
+            write_csv(os.path.join(d, 'data', 'pZAP70_Tyr493_mean.csv'),
+                      {ln: arr.mean(axis=0) for ln, arr in days.items()})
     else:
         write_csv(os.path.join(d, 'data', 'pZAP70_Tyr493_mean.csv'),
                   resampled_means(days, kind,
                                   seed=20260921 + (0 if kind == 'emp' else 5000) + i, i=i))
+
+    if TMAX != 300:                                # simulate far enough to reach the data
+        import re as _re
+        n_patched = 0
+        for bf in glob.glob(os.path.join(d, 'JJ_*.bngl')):
+            txt = open(bf).read()
+            new_txt, k = _re.subn(r't_end\s*=>\s*[0-9.]+', 't_end=>%.1f' % TMAX, txt)
+            if k: open(bf, 'w').write(new_txt); n_patched += k
+        if n_patched == 0:
+            raise SystemExit('ERROR: no simulate_nf t_end found to extend in %s' % d)
 
     cfgp = os.path.join(d, 'v_config.json')
     c = json.load(open(cfgp))
@@ -177,6 +222,7 @@ def build_one(kind, i, days):
                          % (len(warmed), len(c['PARAMS'])))
     if os.environ.get('BOOT_NREPS'):               # NFsim replicates per evaluation
         c['N_REPS'] = int(os.environ['BOOT_NREPS'])
+    c['FIT_TMAX'] = TMAX
     c['NOTE'] = ('bootstrap %s sample %d (KZBG_FRAC=1%s)'
                  % (kind, i, ('; pinned ' + ','.join(PIN)) if PIN else ''))
     json.dump(c, open(cfgp, 'w'), indent=2)
@@ -234,6 +280,7 @@ def build(n_emp, n_par, n_nul=0):
     os.makedirs(BOOT_ROOT, exist_ok=True)
     days = read_days()
     verify_mapping(days)
+    print('fitting window: 0 - %g s   timepoints %s' % (TMAX, TIMES))
     if n_emp > len(EMP_SETS):
         print('note: only %d distinct day-resamples exist; using all of them.' % len(EMP_SETS))
         n_emp = len(EMP_SETS)
@@ -244,10 +291,19 @@ def build(n_emp, n_par, n_nul=0):
     print('day-to-day spread per line (SD across 3 days, timepoints 0/1/2/5 min):')
     for line, arr in days.items():
         print(f'  {line:<6} mean={np.round(arr.mean(axis=0), 4)}  sd={np.round(arr.std(axis=0, ddof=1), 4)}')
-    jobs = []
-    for i in range(0, n_emp + 1): jobs.append(build_one('emp', i, days))
-    for i in range(1, n_par + 1): jobs.append(build_one('par', i, days))
-    for i in range(1, n_nul + 1): jobs.append(build_one('nul', i, days))
+    resume = os.environ.get('BOOT_RESUME') == '1'
+    jobs, kept = [], []
+    def add(kind, i):
+        tag = '%s%03d' % (kind, i)
+        if resume and has_result(tag):
+            kept.append(tag); return
+        jobs.append(build_one(kind, i, days))
+    for i in range(0, n_emp + 1): add('emp', i)
+    for i in range(1, n_par + 1): add('par', i)
+    for i in range(1, n_nul + 1): add('nul', i)
+    if kept:
+        print('resume: %d samples already complete, left alone (%s)'
+              % (len(kept), ', '.join(kept)))
     if PIN: print(f'PINNED at v77 values (not fitted): {PIN}')
     print(f'\nbuilt {len(jobs)} sample directories under {BOOT_ROOT}')
     return jobs
