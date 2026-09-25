@@ -1,0 +1,88 @@
+#!/bin/bash
+# =============================================================================
+# final_ci.sh -- the two tables that go to Indrani, side by side.
+#
+#   bash ~/CD16_NK92_project/filesCC/final_ci.sh          # pZAP + Ca
+#   bash ~/CD16_NK92_project/filesCC/final_ci.sh ca
+#   bash ~/CD16_NK92_project/filesCC/final_ci.sh pzap
+#
+# Reads finished results only.  Submits nothing, changes nothing.
+#
+# WHICH COLUMN TO QUOTE
+#   pZAP prints two interval forms.  Quote the WEIGHTED PERCENTILE one.
+#   Because all 10 possible day-resamples were enumerated and weighted by
+#   their exact multinomial probabilities, the bootstrap distribution is known
+#   exactly -- a discrete distribution on 10 atoms -- so its quantiles are
+#   exact rather than estimated.  The "+/- 1.96 SD" column imposes a normal
+#   shape on those 10 atoms and comes out conservatively wide; it is a bound,
+#   not the answer.
+# =============================================================================
+set -o pipefail
+WHICH=${1:-both}
+F=~/CD16_NK92_project/filesCC
+CADIR=$HOME/Ca_fit_c02
+
+case "$WHICH" in
+  both|ca|pzap) ;;
+  *) echo "ERROR: use 'both', 'ca' or 'pzap'"; exit 2 ;;
+esac
+
+# ---- interpreter (same probe as pairs.sh; $CONDA_PREFIX first) --------------
+echo "setting up the job environment (module + conda)..."
+[ -f /etc/profile.d/modules.sh ] && . /etc/profile.d/modules.sh 2>/dev/null
+module load Miniconda3/4.9.2 >/dev/null 2>&1
+CONDA_SH=/gpfs0/scratch/miniforge3/24.11.2/etc/profile.d/conda.sh
+if [ -f "$CONDA_SH" ]; then
+  # shellcheck disable=SC1090
+  . "$CONDA_SH" >/dev/null 2>&1 && conda activate CD16_v2 >/dev/null 2>&1
+fi
+PY="${PZ_PY:-}"
+if [ -z "$PY" ]; then
+  TMO=""; command -v timeout >/dev/null 2>&1 && TMO="timeout 180"
+  for cand in "${CONDA_PREFIX:+$CONDA_PREFIX/bin/python}" python python3; do
+    [ -n "$cand" ] || continue
+    c=$(command -v "$cand" 2>/dev/null || { [ -x "$cand" ] && echo "$cand"; })
+    [ -n "$c" ] || continue
+    if $TMO "$c" -c "import pandas,numpy,matplotlib" >/dev/null 2>&1; then PY="$c"; break; fi
+  done
+fi
+if [ -z "$PY" ]; then
+  echo "ERROR: no python with pandas + matplotlib."
+  echo "  module load Miniconda3/4.9.2 && source $CONDA_SH && conda activate CD16_v2"
+  echo "then rerun, or:  PZ_PY=\$CONDA_PREFIX/bin/python bash \$0"
+  exit 1
+fi
+echo "using $PY"
+
+if [ "$WHICH" = both ] || [ "$WHICH" = pzap ]; then
+  echo
+  echo "##############################################################"
+  echo "#  pZAP70 (Tyr493)   --  quote the WEIGHTED PERCENTILE column"
+  echo "##############################################################"
+  if [ -x "$F/pzap_max.sh" ] || [ -f "$F/pzap_max.sh" ]; then
+    BOOT_NOSERVE=1 bash "$F/pzap_max.sh" report
+  else
+    echo "pzap_max.sh not found in $F"
+  fi
+fi
+
+if [ "$WHICH" = both ] || [ "$WHICH" = ca ]; then
+  echo
+  echo "##############################################################"
+  echo "#  Calcium   --  'lin1' is the reportable variant"
+  echo "#  (C1, C2, g, S fitted; k4 fixed at 1; all parameters shared"
+  echo "#   across adaptors, only the ITAM count differs 6 / 2 / 4)"
+  echo "##############################################################"
+  if [ -d "$CADIR" ]; then
+    cd "$CADIR" && "$PY" "$F/bootstrap_ca2.py" report
+  else
+    echo "$CADIR not found"
+  fi
+fi
+
+echo
+echo "=============================================================="
+echo "Reminder before this goes in an email:"
+echo "  * on a pZAP row means the reference fit falls OUTSIDE its own"
+echo "  interval -- bootstrap bias, needs a BCa correction first."
+echo "=============================================================="
