@@ -58,6 +58,12 @@ HALF = float(os.environ.get('BOOT_HALF', '0.60'))  # warm-start half-width in lo
 ORIG_B = {'lig0': (1.4, 2.4), 'kdl0': (-4.5, -2.3), 'ZAP0': (2.0, 3.2),
           'SYK0': (0.5, 2.5), 'KZP_MULT': (-0.3, 1.0), 'KPR_MULT': (-1.0, 1.0)}
 
+def canon(n):
+    """The config/.bngl spell it kd10 (digit one); our tables say kdl0."""
+    n = n.strip()
+    return 'kdl0' if n.lower() in ('kd10', 'kdl0') else n
+
+
 def read_days():
     """{line: DataFrame(3 days x 4 timepoints)} for the Tyr493 marker."""
     d = pd.read_excel(XLSX, sheet_name='Original_values')
@@ -149,15 +155,26 @@ def build_one(kind, i, days):
     if 'KZBG_FRAC' in c['PARAMS']:
         j = c['PARAMS'].index('KZBG_FRAC')
         for k in ('PARAMS', 'LB', 'UB'): c[k].pop(j)
-    for n, v in V77.items():                       # warm start: narrow box, clipped to orig bounds
-        if n in c['PARAMS']:
-            j = c['PARAMS'].index(n)
-            if n in PIN:                           # pinned: collapse the box to a point
-                c['LB'][j] = c['UB'][j] = round(v, 6)
-                continue
-            lo, hi = ORIG_B.get(n, MULT_BOUNDS.get(n, (-9.0, 9.0)))
-            c['LB'][j] = round(max(lo, v - HALF), 4)
-            c['UB'][j] = round(min(hi, v + HALF), 4)
+    # Iterate the CONFIG's parameter names (not our table's), so a spelling
+    # difference like kd10 vs kdl0 can never silently skip a warm start.
+    warmed = []
+    for j, name in enumerate(c['PARAMS']):
+        cn = canon(name)
+        if cn not in V77:
+            raise SystemExit('ERROR: config parameter %r has no warm-start centre '
+                             '(known: %s)' % (name, sorted(V77)))
+        v = V77[cn]
+        if cn in [canon(x) for x in PIN]:          # pinned: collapse the box to a point
+            c['LB'][j] = c['UB'][j] = round(v, 6)
+            warmed.append(name + '(pinned)')
+            continue
+        lo, hi = ORIG_B.get(cn, MULT_BOUNDS.get(cn, (-9.0, 9.0)))
+        c['LB'][j] = round(max(lo, v - HALF), 4)
+        c['UB'][j] = round(min(hi, v + HALF), 4)
+        warmed.append(name)
+    if len(warmed) != len(c['PARAMS']):
+        raise SystemExit('ERROR: warm start covered %d of %d parameters'
+                         % (len(warmed), len(c['PARAMS'])))
     if os.environ.get('BOOT_NREPS'):               # NFsim replicates per evaluation
         c['N_REPS'] = int(os.environ['BOOT_NREPS'])
     c['NOTE'] = ('bootstrap %s sample %d (KZBG_FRAC=1%s)'
@@ -165,7 +182,10 @@ def build_one(kind, i, days):
     json.dump(c, open(cfgp, 'w'), indent=2)
     if i == 1:
         print(f'    [{kind}] PARAMS={c["PARAMS"]}')
-        print(f'    [{kind}] FIXED={c["FIXED"]}')
+        print(f'    [{kind}] FIXED={c["FIXED"]}   N_REPS={c.get("N_REPS")}')
+        print(f'    [{kind}] warm-started: {warmed}')
+        print('    [%s] box: %s' % (kind, {n: (c['LB'][j], c['UB'][j])
+                                           for j, n in enumerate(c['PARAMS'])}))
 
     run = os.path.join(BOOT_ROOT, f'run_{tag}.sh')
     with open(run, 'w') as f:

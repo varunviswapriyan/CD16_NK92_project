@@ -128,7 +128,9 @@ B = {}
 for d in sorted(glob.glob(os.path.join(ROOT, '*[0-9]'))):
     p = os.path.join(d, SUB, 'v_config.json')
     if os.path.exists(p):
-        c = json.load(open(p)); B = dict(zip(c['PARAMS'], zip(c['LB'], c['UB']))); break
+        c = json.load(open(p))
+        B = {norm(n): b for n, b in zip(c['PARAMS'], zip(c['LB'], c['UB']))}
+        break
 
 hdr = ('%-9s %11s %11s %24s %6s %24s'
        % ('param', 'point est', 'boot SD', '95% CI (+/-1.96 SD)', 'w', 'weighted percentile CI'))

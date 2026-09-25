@@ -20,6 +20,10 @@ TIMES = [0.0, 60.0, 120.0, 300.0]
 SETS  = list(combinations_with_replacement(range(3), 3))
 FIT6  = ['lig0', 'kdl0', 'ZAP0', 'SYK0', 'KZP_MULT', 'KPR_MULT']
 
+def canon(n):
+    n = n.strip()
+    return 'kdl0' if n.lower() in ('kd10', 'kdl0') else n
+
 x = pd.read_excel(XLSX, sheet_name='Original_values')
 x = x[x['marker'].astype(str).str.strip() == MARK]
 days = {}
@@ -60,10 +64,13 @@ for d in sorted(glob.glob(os.path.join(ROOT, '*[0-9]'))):
                 bad.append('%s %s @%gs: file=%.6f expected=%.6f'
                            % (tag, col, t, float(row.iloc[0]), v))
     cfg = json.load(open(os.path.join(d, SUB, 'v_config.json')))
-    if sorted(cfg['PARAMS']) != sorted(FIT6):
+    if sorted(canon(x) for x in cfg['PARAMS']) != sorted(FIT6):
         bad.append('%s: PARAMS=%s' % (tag, cfg['PARAMS']))
     if cfg.get('FIXED', {}).get('KZBG_FRAC') != 1.0:
         bad.append('%s: KZBG_FRAC not fixed at 1.0' % tag)
+    for j, nm in enumerate(cfg['PARAMS']):         # a collapsed or absurd box is a bug
+        if not (cfg['UB'][j] > cfg['LB'][j]):
+            bad.append('%s: %s has LB>=UB (%s, %s)' % (tag, nm, cfg['LB'][j], cfg['UB'][j]))
 
 # every distinct day-set must produce a DISTINCT dataset
 sigs = {}
