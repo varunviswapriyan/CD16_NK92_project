@@ -256,6 +256,7 @@ def build_one(kind, i, days):
         print('    [%s] box: %s' % (kind, {n: (c['LB'][j], c['UB'][j])
                                            for j, n in enumerate(c['PARAMS'])}))
 
+    walltime = os.environ.get('BOOT_WALLTIME', '8:00:00')
     run = os.path.join(BOOT_ROOT, f'run_{tag}.sh')
     with open(run, 'w') as f:
         f.write(f"""#!/bin/bash
@@ -264,7 +265,7 @@ def build_one(kind, i, days):
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=64G
-#SBATCH --time=8:00:00
+#SBATCH --time={walltime}
 #SBATCH --output={dst}/{tag}.log
 {ENV}
 cd {d}
