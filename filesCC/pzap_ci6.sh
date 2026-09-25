@@ -41,10 +41,12 @@ export BOOT_PARTICLES=24
 export BOOT_ITERS=20        # fewer iterations, bought back as replicates below
 export BOOT_NREPS=6         # was 3: halves the objective's noise variance
 ROOT=~/boot_pzap
+PY=$(command -v python3 || command -v python)   # login nodes have python3, not always python
+if [ -z "$PY" ]; then echo "no python found on PATH"; exit 1; fi
 
 # ----------------------------------------------------------------- report ----
 if [ "$1" = "report" ]; then
-ROOT="$ROOT" python3 - <<'PY'
+ROOT="$ROOT" "$PY" - <<'PY'
 import os, glob, json
 import numpy as np
 from itertools import combinations_with_replacement
@@ -204,7 +206,7 @@ PY
   cp $ROOT/ci_hist_6param.png $OUT/ 2>/dev/null || true
   IP=$(hostname -I | awk '{for(i=1;i<=NF;i++) if($i ~ /^10\.73\./) print $i}')
   echo; echo "Open:  http://${IP:-10.73.170.128}:8000/"
-  cd $OUT && python -m http.server 8000
+  cd $OUT && "$PY" -m http.server 8000
   exit 0
 fi
 
@@ -223,11 +225,11 @@ fi
 rm -rf $ROOT ~/boot_pzap_pinZAP0 ~/boot_pzap_pinKZP_MULT_KPR_MULT
 
 echo "== 1/3  building 1 reference + 10 day-sets + $NN null =="
-python $F/bootstrap_pzap.py build 10 0 "$NN"
+"$PY" $F/bootstrap_pzap.py build 10 0 "$NN"
 
 echo
 echo "== 2/3  verifying every sample against an independent recomputation =="
-if ! python3 $F/verify_boot.py "$ROOT"; then
+if ! "$PY" $F/verify_boot.py "$ROOT"; then
   echo
   echo "ABORTED -- nothing submitted.  Fix the mismatch above first."
   exit 1
