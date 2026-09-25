@@ -51,9 +51,19 @@ if [ "$1" = "add" ]; then
     echo "$R" | sed 's|.*/\(boot_pzap[^/]*\)/.*|   \1|' | sort | uniq -c
   fi
   echo
-  a2=0; b=0
+  a=0; a2=0; b=0
+  echo "$R" | grep -q '/boot_pzap/'      && a=1
   echo "$R" | grep -q '/boot_pzap_n16/'  && a2=1
   echo "$R" | grep -q '/boot_pzap_t600/' && b=1
+  # arm A (last night) may be missing a day-set whose directory was never built;
+  # resume rebuilds and submits ONLY what is absent or unfinished.
+  if [ $a = 1 ]; then
+    echo "arm A  is already running -- leaving it."
+  else
+    echo "################  ARM A -- 300 s, resuming any missing day-set  ################"
+    BOOT_NOCANCEL=1 BOOT_RESUME=1 bash $F/pzap_ci6.sh
+  fi
+  echo
   [ $a2 = 1 ] && echo "arm A2 is already running -- leaving it."  || submit_A2
   echo
   [ $b  = 1 ] && echo "arm B  is already running -- leaving it."  || submit_B
