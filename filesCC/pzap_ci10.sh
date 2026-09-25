@@ -224,6 +224,7 @@ PY
   cp $ROOT/ci_hist_6param.png $OUT/ 2>/dev/null || true
   IP=$(hostname -I | awk '{for(i=1;i<=NF;i++) if($i ~ /^10\.73\./) print $i}')
   echo; echo "Open:  http://${IP:-10.73.170.128}:8000/"
+  if [ -n "$BOOT_NOSERVE" ]; then exit 0; fi   # a launcher is printing several reports
   cd $OUT && "$PY" -m http.server 8000
   exit 0
 fi
@@ -270,5 +271,7 @@ else
   for f in "${todo[@]}"; do sbatch "$f"; done
 fi
 echo
-echo "$((11 + NN)) jobs.  24 particles x 20 iterations, N_REPS=6 -> about 4 h each,"
-echo "one queue wave.   Results:  bash \$0 report"
+echo "$((11 + NN)) jobs into $ROOT"
+echo "  window 0-${BOOT_TMAX:-300} s | ${BOOT_PARTICLES} particles x ${BOOT_ITERS} iterations"
+echo "  N_REPS=${BOOT_NREPS} | warm box +/-${BOOT_HALF} log10"
+echo "Results:  bash \$0 report"
