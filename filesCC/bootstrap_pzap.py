@@ -23,6 +23,8 @@ short PSO run. Nothing in her fitting code is modified.
     python ~/CD16_NK92_project/filesCC/bootstrap_pzap.py report
 """
 import os, sys, json, glob, shutil, subprocess
+from itertools import combinations_with_replacement
+from math import factorial
 import numpy as np
 import pandas as pd
 
@@ -41,7 +43,8 @@ MARKER   = 'pZAP70 (Tyr493)'
 LINE2COL = {'KI 1': 'mean_zeta', 'KI 2': 'mean_gamma', 'KI 6': 'mean_hetero'}
 DAYCOLS  = ['d_0', 'd_1', 'd_2', 'd_5']          # 0, 60, 120, 300 s -- the fitted points
 TIMES    = [0.0, 60.0, 120.0, 300.0]
-PARTICLES, ITERS = 16, 20                        # warm-started: short run is enough
+PARTICLES = int(os.environ.get('BOOT_PARTICLES', '16'))   # PSO swarm size
+ITERS     = int(os.environ.get('BOOT_ITERS', '20'))       # PSO iterations
 ENV = ('module load Miniconda3/4.9.2; '
        'source /gpfs0/scratch/miniforge3/24.11.2/etc/profile.d/conda.sh; conda activate CD16_v2')
 
@@ -67,18 +70,37 @@ def read_days():
         out[line] = sub[DAYCOLS].to_numpy(float)   # (3 days, 4 timepoints)
     return out
 
-def resampled_means(days, kind, seed):
+# ---- the COMPLETE empirical bootstrap over 3 experiment days -----------------
+# Resampling 3 days with replacement has exactly 10 distinct outcomes.  Fitting
+# all ten and weighting each by its multinomial probability gives the exact
+# bootstrap distribution -- no Monte-Carlo error, and fewer jobs than random
+# draws.  Lilly ran all three cell lines on the SAME three days, so a day is
+# resampled as a unit and the same day-set is applied to every line.
+EMP_SETS = list(combinations_with_replacement(range(3), 3))     # 10 multisets
+
+def emp_weight(ms):
+    c = [list(ms).count(k) for k in range(3)]
+    p = factorial(3)
+    for x in c: p //= factorial(x)
+    return p / 27.0
+
+def resampled_means(days, kind, seed, i=1):
     """-> {line: array(4 timepoints)} of bootstrap means."""
     rng = np.random.RandomState(seed % (2**32 - 1))
     out = {}
+    sel = EMP_SETS[(i - 1) % len(EMP_SETS)]          # same day-set for every line
     for line, arr in days.items():
         if kind == 'emp':
-            idx = rng.randint(0, arr.shape[0], size=arr.shape[0])    # resample days
-            out[line] = arr[idx].mean(axis=0)
+            out[line] = arr[list(sel)].mean(axis=0)
         else:                                                        # parametric
+            # We are resampling the MEAN of n days, whose sampling distribution
+            # has standard error sd/sqrt(n) -- not sd.  Drawing at sd inflates
+            # every synthetic dataset by sqrt(n) and produces shapes the model
+            # cannot fit, which shows up as huge parameter scatter.
+            n = arr.shape[0]
             mu = arr.mean(axis=0)
-            sd = arr.std(axis=0, ddof=1)
-            out[line] = rng.normal(mu, np.maximum(sd, 1e-12))
+            se = arr.std(axis=0, ddof=1) / np.sqrt(n)
+            out[line] = rng.normal(mu, np.maximum(se, 1e-12))
         out[line][0] = 0.0                                           # t=0 is 0 by construction
     return out
 
@@ -99,14 +121,21 @@ def build_one(kind, i, days):
     dst = os.path.join(BOOT_ROOT, tag)
     if os.path.isdir(dst): shutil.rmtree(dst)
     shutil.copytree(SRC, dst, ignore=shutil.ignore_patterns(
-        'zeta_runs', 'gamma_runs', 'mixed_runs', '*.png', 'slurm*.out', '*.log'))
+        'zeta_runs', 'gamma_runs', 'mixed_runs', '*.png', 'slurm*.out', '*.log',
+        # v77's OWN result file lives here; copying it means an unfinished sample
+        # looks like a finished one holding v77's 4-parameter answer.
+        'analysis_param_residue.dat'))
     d = os.path.join(dst, SUB)
 
-    if i == 0:
-        pass                                       # reference: leave the shipped CSV exactly as-is
+    if i == 0 or kind == 'nul':
+        # reference AND null samples both use the shipped CSV untouched.  A null
+        # differs from the reference only in the optimizer's own randomness, so
+        # the spread across nulls is pure simulation/optimizer noise.
+        pass
     else:
         write_csv(os.path.join(d, 'data', 'pZAP70_Tyr493_mean.csv'),
-                  resampled_means(days, kind, seed=20260921 + (0 if kind == 'emp' else 5000) + i))
+                  resampled_means(days, kind,
+                                  seed=20260921 + (0 if kind == 'emp' else 5000) + i, i=i))
 
     cfgp = os.path.join(d, 'v_config.json')
     c = json.load(open(cfgp))
@@ -129,6 +158,8 @@ def build_one(kind, i, days):
             lo, hi = ORIG_B.get(n, MULT_BOUNDS.get(n, (-9.0, 9.0)))
             c['LB'][j] = round(max(lo, v - HALF), 4)
             c['UB'][j] = round(min(hi, v + HALF), 4)
+    if os.environ.get('BOOT_NREPS'):               # NFsim replicates per evaluation
+        c['N_REPS'] = int(os.environ['BOOT_NREPS'])
     c['NOTE'] = ('bootstrap %s sample %d (KZBG_FRAC=1%s)'
                  % (kind, i, ('; pinned ' + ','.join(PIN)) if PIN else ''))
     json.dump(c, open(cfgp, 'w'), indent=2)
@@ -179,22 +210,30 @@ def verify_mapping(days):
     print('mapping verified: ' + ', '.join('%s -> %s' % (k, v) for k, v in LINE2COL.items()))
 
 
-def build(n_emp, n_par):
+def build(n_emp, n_par, n_nul=0):
     os.makedirs(BOOT_ROOT, exist_ok=True)
     days = read_days()
     verify_mapping(days)
+    if n_emp > len(EMP_SETS):
+        print('note: only %d distinct day-resamples exist; using all of them.' % len(EMP_SETS))
+        n_emp = len(EMP_SETS)
+    if n_emp:
+        print('empirical bootstrap: all %d day-sets, weights (x/27): %s'
+              % (n_emp, ', '.join('%s=%d' % (tuple(d + 1 for d in m), round(emp_weight(m) * 27))
+                                  for m in EMP_SETS[:n_emp])))
     print('day-to-day spread per line (SD across 3 days, timepoints 0/1/2/5 min):')
     for line, arr in days.items():
         print(f'  {line:<6} mean={np.round(arr.mean(axis=0), 4)}  sd={np.round(arr.std(axis=0, ddof=1), 4)}')
     jobs = []
     for i in range(0, n_emp + 1): jobs.append(build_one('emp', i, days))
     for i in range(1, n_par + 1): jobs.append(build_one('par', i, days))
+    for i in range(1, n_nul + 1): jobs.append(build_one('nul', i, days))
     if PIN: print(f'PINNED at v77 values (not fitted): {PIN}')
     print(f'\nbuilt {len(jobs)} sample directories under {BOOT_ROOT}')
     return jobs
 
-def submit(n_emp, n_par):
-    for tag, run in build(n_emp, n_par):
+def submit(n_emp, n_par, n_nul=0):
+    for tag, run in build(n_emp, n_par, n_nul):
         out = subprocess.run(['sbatch', run], stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, universal_newlines=True)
         print(f'{tag}: {out.stdout.strip()}', flush=True)
@@ -325,7 +364,9 @@ def report():
 if __name__ == '__main__':
     a = sys.argv[1:]
     if not a: print(__doc__); sys.exit(0)
-    if a[0] == 'build':  build(int(a[1]) if len(a) > 1 else 12, int(a[2]) if len(a) > 2 else 12)
-    elif a[0] == 'submit': submit(int(a[1]) if len(a) > 1 else 12, int(a[2]) if len(a) > 2 else 12)
+    def _n(k, dflt):
+        return int(a[k]) if len(a) > k else dflt
+    if a[0] == 'build':    build(_n(1, 12), _n(2, 12), _n(3, 0))
+    elif a[0] == 'submit': submit(_n(1, 12), _n(2, 12), _n(3, 0))
     elif a[0] == 'report': report()
     else: print(__doc__)
