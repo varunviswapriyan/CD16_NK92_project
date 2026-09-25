@@ -30,6 +30,7 @@ SUB=estimate_params_pzap_cleaned_up
 # The login shell is non-interactive here, so `module` may be undefined and the
 # system python3 usually has no matplotlib.  Try the job environment first,
 # then fall back, and say plainly what to do if neither works.
+echo "setting up the job environment (module + conda)..."
 [ -f /etc/profile.d/modules.sh ] && . /etc/profile.d/modules.sh 2>/dev/null
 module load Miniconda3/4.9.2 >/dev/null 2>&1
 CONDA_SH=/gpfs0/scratch/miniforge3/24.11.2/etc/profile.d/conda.sh
@@ -38,18 +39,36 @@ if [ -f "$CONDA_SH" ]; then
   . "$CONDA_SH" >/dev/null 2>&1 && conda activate CD16_v2 >/dev/null 2>&1
 fi
 
-PY=""
-for cand in python python3 /gpfs0/scratch/miniforge3/24.11.2/envs/CD16_v2/bin/python; do
-  c=$(command -v "$cand" 2>/dev/null || { [ -x "$cand" ] && echo "$cand"; })
-  [ -n "$c" ] || continue
-  if "$c" -c "import pandas,numpy,matplotlib" >/dev/null 2>&1; then PY="$c"; break; fi
-done
+# $CONDA_PREFIX is set by the activate above and is the exact interpreter the
+# cluster jobs use, so try it FIRST -- probing a python that lacks matplotlib
+# still pays the full pandas import off GPFS before it fails, which is what
+# made this look hung.
+PY="${PZ_PY:-}"
+if [ -n "$PY" ]; then
+  echo "using \$PZ_PY = $PY"
+else
+  echo "looking for a python with pandas + matplotlib..."
+  echo "(first import off GPFS is slow -- up to a minute or two, this is normal)"
+  TMO=""; command -v timeout >/dev/null 2>&1 && TMO="timeout 180"
+  for cand in "${CONDA_PREFIX:+$CONDA_PREFIX/bin/python}" python python3; do
+    [ -n "$cand" ] || continue
+    c=$(command -v "$cand" 2>/dev/null || { [ -x "$cand" ] && echo "$cand"; })
+    [ -n "$c" ] || continue
+    printf '  trying %-60s ' "$c"
+    if $TMO "$c" -c "import pandas,numpy,matplotlib" >/dev/null 2>&1; then
+      echo "OK"; PY="$c"; break
+    fi
+    echo "no (missing a module)"
+  done
+fi
 if [ -z "$PY" ]; then
   echo "ERROR: could not find a python with pandas + matplotlib."
   echo "Run these three lines first, then rerun this script:"
   echo "  module load Miniconda3/4.9.2"
   echo "  source $CONDA_SH"
   echo "  conda activate CD16_v2"
+  echo "then rerun, or point this script straight at an interpreter:"
+  echo "  PZ_PY=\$CONDA_PREFIX/bin/python bash \$0"
   exit 1
 fi
 echo "using $PY"
