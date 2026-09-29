@@ -68,6 +68,25 @@ VARIANTS = {
     # Fix k4 = 1 and let C1 carry the coupling: same model, same curves, no valley.
     'lin1':     dict(fit=['C1','C2','g','S'],           fix={'k4': 1.0},             hill=False, lin=True),
     'lin1S':    dict(fit=['C1','C2','g'],               fix={'k4': 1.0, 'S': 31.5},  hill=False, lin=True),
+    # --- her model EXACTLY as written: no S at all ---------------------------
+    # S was OUR addition.  Setting S = 1 makes cs = Ca, which is her original
+    # equations verbatim.  If this fits as well as the versions with S, then S
+    # was an unnecessary parameter and should be dropped.  If it fits badly,
+    # that is the evidence S is a units conversion rather than a free knob:
+    # her k1 = k2 = 0.7 are micromolar, the data is fluorescence 50-200, so
+    # with S = 1 the feedback term saturates at 1 and the h-gate target goes to
+    # 0 -- two of her mechanisms switch off, and the fit should show it.
+    'orig':     dict(fit=['C1','C2','g','k3','k4'],     fix={'S': 1.0},              hill=True,  lin=True),
+    'orig1':    dict(fit=['C1','C2','g','k3'],          fix={'S': 1.0, 'k4': 1.0},   hill=True,  lin=True),
+    # --- her FULL structure (both terms) with the C1*k4 valley closed --------
+    # With the Hill term present, F = Hill(z;k3) + k4*z, and C1 multiplies the
+    # SUM.  The Hill part is capped at 1 and carries no coefficient, so C1
+    # cannot be rescaled to absorb k4: fixing k4 = 1 here is a genuine
+    # RESTRICTION, not the exact reparameterisation it is in lin1.  That makes
+    # it a test.  If the SSR stays at 5.210e4 while k3 comes back with a huge
+    # interval, the Hill term is inert -- demonstrated from inside her model
+    # rather than by deleting a term from it.
+    'full1':    dict(fit=['C1','C2','g','k3','S'],      fix={'k4': 1.0},             hill=True,  lin=True),
 }
 
 N_STARTS, PARTICLES, ITERS = 2, 30, 90
