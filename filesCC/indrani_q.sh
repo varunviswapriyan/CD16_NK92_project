@@ -4,6 +4,7 @@
 #
 #   bash ~/CD16_NK92_project/filesCC/indrani_q.sh submit    # Q3: the Ca ladder
 #   bash ~/CD16_NK92_project/filesCC/indrani_q.sh flowkit   # Q5: find her code
+#   bash ~/CD16_NK92_project/filesCC/indrani_q.sh flowprep  # Q5: install + read it
 #   bash ~/CD16_NK92_project/filesCC/indrani_q.sh report    # Q3: the comparison
 #   bash ~/CD16_NK92_project/filesCC/indrani_q.sh status
 #
@@ -60,8 +61,58 @@ fi
 echo "using $PY"
 echo
 
-case "$MODE" in submit|flowkit|report|status) ;; *)
-  echo "use: submit | flowkit | report | status"; exit 2 ;; esac
+case "$MODE" in submit|flowkit|flowprep|report|status) ;; *)
+  echo "use: submit | flowkit | flowprep | report | status"; exit 2 ;; esac
+
+# ----------------------------------------------------------------- flowprep --
+# Get ready for Oscar's .fcs files: make sure FlowKit is importable, then show
+# what Indrani's notebook actually does so the new files can be run through the
+# same pipeline rather than a reimplementation of it.
+if [ "$MODE" = flowprep ]; then
+  echo "=============== 1. FlowKit ==============="
+  if "$PY" -c "import flowkit" >/dev/null 2>&1; then
+    "$PY" -c "import flowkit; print('  already installed:', flowkit.__version__)"
+  else
+    echo "  not installed -- installing into $(dirname "$(dirname "$PY")")"
+    "$PY" -m pip install --quiet flowkit 2>&1 | tail -5
+    "$PY" -c "import flowkit; print('  now at', flowkit.__version__)" 2>/dev/null \
+      || { echo "  INSTALL FAILED."; echo "  The cluster may block PyPI.  Try:"; \
+           echo "    $PY -m pip install --user flowkit"; }
+  fi
+
+  NB=$(find "$HOME" -maxdepth 5 -name 'Ca_flow_analysis_mean_se.ipynb' 2>/dev/null | head -1)
+  echo
+  echo "=============== 2. Indrani's notebook ==============="
+  if [ -z "$NB" ]; then echo "  not found"; exit 0; fi
+  echo "  $NB"
+  echo
+  NB="$NB" "$PY" - <<'PYNB'
+import json, os
+nb = json.load(open(os.environ['NB']))
+cells = [c for c in nb.get('cells', []) if c.get('cell_type') == 'code']
+print('  %d code cells.  Source only, outputs stripped:' % len(cells))
+print('  ' + '-' * 68)
+for i, c in enumerate(cells, 1):
+    src = ''.join(c.get('source', [])).rstrip()
+    if not src.strip():
+        continue
+    print('\n  ----- cell %d -----' % i)
+    for ln in src.splitlines():
+        print('  ' + ln)
+PYNB
+  echo
+  echo "=============== 3. .fcs files you already have ==============="
+  find "$HOME" -maxdepth 5 -name '*.fcs' 2>/dev/null | xargs -r -n1 basename \
+    | sort -u | sed 's|^|  |'
+  echo
+  echo "  Indrani's email says you still need, from Oscar:"
+  echo "    Experiment 1, Replicate 2   (truncate at 280 s)"
+  echo "    Experiment 2, Replicate 1   (fit separately, supplementary)"
+  echo "  With Exp1 Rep2 added you have THREE replicates, which means the Ca"
+  echo "  CIs can use the same day-resampling bootstrap as pZAP instead of the"
+  echo "  parametric draw from mean +/- SE."
+  exit 0
+fi
 
 # ------------------------------------------------------------------ flowkit --
 if [ "$MODE" = flowkit ]; then
