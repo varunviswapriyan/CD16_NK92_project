@@ -5,6 +5,7 @@
 #   bash ~/CD16_NK92_project/filesCC/indrani_q.sh submit    # Q3: the Ca ladder
 #   bash ~/CD16_NK92_project/filesCC/indrani_q.sh flowkit   # Q5: find her code
 #   bash ~/CD16_NK92_project/filesCC/indrani_q.sh flowprep  # Q5: install + read it
+#   bash ~/CD16_NK92_project/filesCC/indrani_q.sh refs      # Q3: the 3 SSRs
 #   bash ~/CD16_NK92_project/filesCC/indrani_q.sh report    # Q3: the comparison
 #   bash ~/CD16_NK92_project/filesCC/indrani_q.sh status
 #
@@ -61,8 +62,75 @@ fi
 echo "using $PY"
 echo
 
-case "$MODE" in submit|flowkit|flowprep|report|status) ;; *)
-  echo "use: submit | flowkit | flowprep | report | status"; exit 2 ;; esac
+case "$MODE" in submit|flowkit|flowprep|refs|report|status) ;; *)
+  echo "use: submit | flowkit | flowprep | refs | report | status"; exit 2 ;; esac
+
+# --------------------------------------------------------------------- refs --
+# The reference fit of each variant is sample 0.  ca_check.sh summarises only
+# the bootstrap samples (sample > 0), so with NCA=0 it shows nothing -- this
+# reads sample 0 directly, which is the whole answer to Indrani's Q3.
+if [ "$MODE" = refs ]; then
+  [ -d "$CADIR" ] || { echo "ERROR: $CADIR not found"; exit 1; }
+  cd "$CADIR" || exit 1
+  "$PY" - <<'PYREF'
+import json, os
+BASE = 5.210e4                      # lin1 reference SSR, the number to beat
+order = ['lin1', 'orig', 'orig1', 'full1', 'full']
+what  = {'orig':  'her model exactly: C1 C2 g k3 k4, S=1, both terms',
+         'orig1': 'hers + k4=1',
+         'full1': 'hers + S restored + k4=1',
+         'lin1':  'what we have been reporting',
+         'full':  'the 6-parameter baseline'}
+print('%-7s %12s %8s   %s' % ('variant', 'ref SSR', 'x lin1', 'what it is'))
+print('-' * 78)
+rows = {}
+for v in order:
+    f = os.path.join('out_boot_ca2', v, 'boot_000.json')
+    if not os.path.exists(f):
+        print('%-7s %12s %8s   %s' % (v, '-', '-', 'not run')); continue
+    try:
+        d = json.load(open(f))
+    except Exception as e:
+        print('%-7s  unreadable: %s' % (v, e)); continue
+    if not d.get('ok'):
+        print('%-7s  FAILED: %s' % (v, d.get('error', '?'))); continue
+    s = float(d['ssr']); rows[v] = (s, d.get('params', {}), d.get('fixed', {}))
+    print('%-7s %12.4e %8.2f   %s' % (v, s, s / BASE, what.get(v, '')))
+print('-' * 78)
+for v in order:
+    if v in rows:
+        s, p, fx = rows[v]
+        print('  %-7s %s%s' % (v,
+              '  '.join('%s=%.4g' % (k, q) for k, q in sorted(p.items())),
+              ('   [fixed: %s]' % ', '.join('%s=%g' % (k, q) for k, q in sorted(fx.items()))) if fx else ''))
+
+o = rows.get('orig', (None,))[0]
+f1 = rows.get('full1', (None,))[0]
+print()
+print('=' * 78)
+if o is None:
+    print('VERDICT: orig has not run -- submit it before answering Indrani.')
+elif o <= 1.15 * BASE:
+    print('VERDICT: orig fits as well as lin1 (%.2fx).' % (o / BASE))
+    print('  S WAS NOT NEEDED.  Drop it and report her five parameters unchanged.')
+    print('  Tell her: no new parameter, no removals -- her model as written.')
+else:
+    print('VERDICT: orig is %.1fx worse than lin1.' % (o / BASE))
+    print('  S is doing real work.  It converts the dimensionless Indo-1 high/low')
+    print('  ratio into the micromolar units her k1 = k2 = 0.7 assume; at S = 1 the')
+    print('  feedback term saturates at 1 and the h-gate target collapses to 0, so')
+    print('  two of her own mechanisms switch off.  Quote both SSRs to her.')
+    if f1 is not None and f1 <= 1.15 * BASE:
+        print()
+        print('  AND full1 fits at %.2fx -- so report full1: k3 kept, S kept,' % (f1 / BASE))
+        print('  only k4 pinned (a reparameterisation).  Nothing of hers removed.')
+    elif f1 is not None:
+        print()
+        print('  full1 is %.1fx worse, so k3 cannot be carried -- report lin1.' % (f1 / BASE))
+print('=' * 78)
+PYREF
+  exit 0
+fi
 
 # ----------------------------------------------------------------- flowprep --
 # Get ready for Oscar's .fcs files: make sure FlowKit is importable, then show
