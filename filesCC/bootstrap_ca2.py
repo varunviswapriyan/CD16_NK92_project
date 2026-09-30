@@ -89,7 +89,13 @@ VARIANTS = {
     'full1':    dict(fit=['C1','C2','g','k3','S'],      fix={'k4': 1.0},             hill=True,  lin=True),
 }
 
-N_STARTS, PARTICLES, ITERS = 2, 30, 90
+# budget is env-overridable so the reference fits can be re-run harder when a
+# variant under-converges (e.g. the 5-param S=1 'orig' getting stuck in a bad
+# local minimum and reporting an SSR WORSE than its own restriction 'orig1',
+# which is mathematically impossible at a true optimum -> it did not converge).
+N_STARTS  = int(os.environ.get('CA_STARTS', '2'))
+PARTICLES = int(os.environ.get('CA_PARTICLES', '30'))
+ITERS     = int(os.environ.get('CA_ITERS', '90'))
 ENV = ('module load Miniconda3/4.9.2; '
        'source /gpfs0/scratch/miniforge3/24.11.2/etc/profile.d/conda.sh; conda activate CD16_v2')
 
@@ -165,6 +171,36 @@ def cost_batch(X):
     with Pool(processes=min(len(X), os.cpu_count() or 1)) as pool:
         return np.asarray(pool.map(cost, [np.asarray(r) for r in X]), float)
 
+def _warm_x0():
+    """Start point taken from another variant's converged reference fit.
+
+    CA_WARM_FROM=orig1  when fitting 'orig' guarantees orig's optimum is <=
+    orig1's: orig1 is a restriction of orig (k4 pinned to 1), so polishing
+    'orig' from orig1's exact solution cannot end up worse than orig1.  This is
+    what makes the S-necessity comparison sound -- a free PSO restart is not
+    guaranteed to escape the bad basin, a warm start from the nested model is.
+    Returns the start in log10 space for the current PN, or None.
+    """
+    src = os.environ.get('CA_WARM_FROM')
+    if not src:
+        return None
+    f = os.path.join(ROOT, src, 'boot_000.json')
+    if not os.path.exists(f):
+        print(f'  CA_WARM_FROM={src}: {f} not found, skipping warm start', flush=True)
+        return None
+    try:
+        d = json.load(open(f))
+        if not d.get('ok'):
+            return None
+        p = dict(BASEFIX); p.update(N01)
+        p.update(d.get('fixed', {})); p.update(d.get('params', {}))
+        x0 = np.array([np.log10(p[n]) for n in PN], float)
+        return x0 if np.all(np.isfinite(x0)) else None
+    except Exception as e:
+        print(f'  warm start failed: {e!r}', flush=True)
+        return None
+
+
 def fit(seed):
     from pyswarms.single.global_best import GlobalBestPSO
     lb = np.array([LOG_B[n][0] for n in PN], float)
@@ -182,6 +218,18 @@ def fit(seed):
         c = min([(f,x),(r1.fun,r1.x),(r2.fun,r2.x)], key=lambda q: q[0])
         xf = np.clip(c[1], lb, ub); ff = cost(xf)
         if ff < bf: bx, bf = xf, ff
+    # warm start from a nested variant's optimum -- polished, then compared
+    warm = _warm_x0()
+    if warm is not None:
+        w = np.clip(warm, lb, ub)
+        rw1 = minimize(cost, x0=w, method='L-BFGS-B', bounds=list(zip(lb,ub)),
+                       options={'maxiter':3000,'ftol':1e-13})
+        rw2 = minimize(cost, x0=rw1.x, method='Nelder-Mead',
+                       options={'maxiter':4000,'xatol':1e-9,'fatol':1e-9})
+        for cf, cx in [(cost(w), w), (rw1.fun, rw1.x), (rw2.fun, rw2.x)]:
+            xf = np.clip(cx, lb, ub); ff = cost(xf)
+            if ff < bf: bx, bf = xf, ff
+        print(f'  warm start from {os.environ.get("CA_WARM_FROM")}: best SSR now {bf:.4e}', flush=True)
     return bx, bf
 
 def run_sample(variant, i):
@@ -207,11 +255,19 @@ def run_sample(variant, i):
 def submit(n, variants):
     os.makedirs('logs_boot_ca2', exist_ok=True)
     script = os.path.abspath(__file__)
+    # forward the convergence knobs into the compute-node environment
+    passenv = ' '.join(f'{k}={os.environ[k]}' for k in
+                       ('CA_STARTS','CA_PARTICLES','CA_ITERS','CA_WARM_FROM')
+                       if k in os.environ)
+    dep = os.environ.get('CA_DEP')          # e.g. afterok:123456 to chain warm starts
     for v in variants:
         for i in range(0, n + 1):          # sample 0 = un-jittered reference fit
             cmd = ['sbatch', '-J', f'{v[:5]}{i:02d}', '-N1','-n1','-c','32','--mem=16G',
-                   '-t','3:00:00','-o', f'logs_boot_ca2/{v}_{i:03d}.log',
-                   '--wrap', f'{ENV}; cd {os.getcwd()}; python {script} {v} {i}']
+                   '-t','3:00:00','-o', f'logs_boot_ca2/{v}_{i:03d}.log']
+            if dep:
+                cmd += ['--dependency', dep]
+            cmd += ['--wrap',
+                    f'{ENV}; cd {os.getcwd()}; {passenv} python {script} {v} {i}']
             r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                universal_newlines=True)
             print(f'{v} {i}: {r.stdout.strip()}', flush=True)

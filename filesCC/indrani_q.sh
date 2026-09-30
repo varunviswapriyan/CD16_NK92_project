@@ -62,8 +62,46 @@ fi
 echo "using $PY"
 echo
 
-case "$MODE" in submit|flowkit|flowprep|refs|report|status) ;; *)
-  echo "use: submit | flowkit | flowprep | refs | report | status"; exit 2 ;; esac
+case "$MODE" in submit|reconverge|flowkit|flowprep|refs|report|status) ;; *)
+  echo "use: submit | reconverge | flowkit | flowprep | refs | report | status"; exit 2 ;; esac
+
+# --------------------------------------------------------------- reconverge --
+# The bug this fixes: the S=1 reference fit 'orig' reported SSR 1.69e6, which is
+# 22x WORSE than its own restriction 'orig1' (7.64e4).  orig1 = orig with k4
+# pinned to 1, so orig CANNOT fit worse than orig1 at a true optimum -- orig's
+# reference fit did not converge, and the "S is 32x better" claim rests on it.
+#
+# This re-runs the reference fits that feed Indrani's Q3 with a much larger
+# multistart budget, and warm-starts 'orig' from 'orig1's converged solution so
+# orig <= orig1 is guaranteed.  After it finishes, `bash $0 refs` gives the
+# HONEST S-necessity number.
+if [ "$MODE" = reconverge ]; then
+  [ -d "$CADIR" ] || { echo "ERROR: $CADIR not found"; exit 1; }
+  cd "$CADIR" || exit 1
+  export CA_STARTS=${CA_STARTS:-8} CA_PARTICLES=${CA_PARTICLES:-60} CA_ITERS=${CA_ITERS:-150}
+  echo "=== reconverge: budget starts=$CA_STARTS particles=$CA_PARTICLES iters=$CA_ITERS ==="
+  echo
+  echo "--- step 1: converged baselines  orig1, lin1, full1  (sample 0 only)"
+  OUT=$("$PY" "$F/bootstrap_ca2.py" submit 0 orig1 lin1 full1)
+  echo "$OUT"
+  JID=$(echo "$OUT" | sed -n 's/^orig1 0: Submitted batch job \([0-9]*\).*/\1/p' | head -1)
+  echo
+  if [ -z "$JID" ]; then
+    echo "WARNING: could not parse orig1's job id -- submitting orig WITHOUT a"
+    echo "dependency.  If orig runs before orig1 finishes the warm start is"
+    echo "skipped; just re-run afterwards:"
+    echo "  CA_WARM_FROM=orig1 $PY $F/bootstrap_ca2.py orig 0"
+    CA_WARM_FROM=orig1 "$PY" "$F/bootstrap_ca2.py" submit 0 orig
+  else
+    echo "--- step 2: orig, warm-started from orig1 (job $JID), runs after it finishes"
+    CA_WARM_FROM=orig1 CA_DEP="afterany:$JID" "$PY" "$F/bootstrap_ca2.py" submit 0 orig
+  fi
+  echo
+  echo "when the queue clears:   bash $0 refs"
+  echo "orig's SSR must now come out <= orig1's 7.64e4.  If it lands near orig1,"
+  echo "the real S improvement is orig1 -> lin1 (7.64e4 -> 5.21e4, ~32% lower)."
+  exit 0
+fi
 
 # --------------------------------------------------------------------- refs --
 # The reference fit of each variant is sample 0.  ca_check.sh summarises only
