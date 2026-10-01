@@ -62,6 +62,42 @@ GRID=${GRID:-$ALLGRID}
 # high-ZAP0 points need much more than the 64G default.
 export BOOT_MEM=${BOOT_MEM:-64G}
 
+# -----------------------------------------------------------------------------
+# SCAN_FREE=1 -- THE RUN THAT CAN ACTUALLY TEST DAS'S TRADE-OFF
+#
+# The default scan warm-starts the five free parameters in a box of v77 +/-
+# BOOT_HALF (0.6 in log10), so kzp may move only 4x either way.  But the ZAP0
+# sweep spans 138 -> 5012, which is 36x (1.56 log10).  For the product
+# ZAP0*kzp to stay constant -- exactly Das's hypothesis -- kzp would have to
+# fall ~36x.  The box FORBIDS that, so the default run cannot see the
+# trade-off even if it is real, and its rising SSR partly measures the box
+# walls rather than the biology.
+#
+# SCAN_FREE lets every non-pinned parameter search its full range (BOOT_FREE)
+# and widens KZP_MULT's range to 10^-2 .. 10^1.5, so kzp can drop ~100x.  It
+# writes to its own _zf** tags so the constrained results stay intact and the
+# two can be compared.
+#
+#   SCAN_FREE=1 bash $0 submit     then     SCAN_FREE=1 bash $0 report
+#
+# READ THE COMPARISON LIKE THIS
+#   free-run SSR now FLAT and kzp ~ 1/ZAP0  -> the constrained verdict was a box
+#        artefact; Das is right, only the product is identifiable.
+#   free-run SSR STILL rises steeply        -> the trade-off genuinely does not
+#        exist; ZAP0 is identifiable and NK92 really does prefer ~140.  That is
+#        now a safe thing to report, because kzp was free to compensate and
+#        chose not to.
+# -----------------------------------------------------------------------------
+if [ "${SCAN_FREE:-0}" = "1" ]; then
+  PFX=zf
+  export BOOT_FREE=${BOOT_FREE:-"lig0,kdl0,SYK0,KZP_MULT,KPR_MULT"}
+  export BOOT_BOUNDS=${BOOT_BOUNDS:-"KZP_MULT=-2.0:1.5"}
+  export BOOT_PARTICLES=${BOOT_PARTICLES:-40}   # full-range search needs more
+  export BOOT_ITERS=${BOOT_ITERS:-50}
+else
+  PFX=zs
+fi
+
 # tag index for a log10 value = its position in ALLGRID (stable across subsets)
 tag_of() {
   local k=0 w
@@ -124,7 +160,7 @@ if [ "$MODE" = logs ]; then
   i=0; noom=0; ndone=0; nfail=0
   for v in $ALLGRID; do
     t=$(tag_of "$v")
-    d="$HOME/boot_pzap_zs${t}_pinZAP0/emp000"
+    d="$HOME/boot_pzap_${PFX}${t}_pinZAP0/emp000"
     lg="$d/emp000.log"
     z=$("$PY" -c "print(round(10**$v))" 2>/dev/null)
     printf -- '--- ZAP0=%-7s tag=_zs%s\n' "$z" "$t"
@@ -177,7 +213,7 @@ if [ "$MODE" = status ]; then
   i=0
   for v in $ALLGRID; do
     t=$(tag_of "$v")
-    d="$HOME/boot_pzap_zs${t}_pinZAP0/emp000/estimate_params_pzap_cleaned_up/analysis_param_residue.dat"
+    d="$HOME/boot_pzap_${PFX}${t}_pinZAP0/emp000/estimate_params_pzap_cleaned_up/analysis_param_residue.dat"
     if [ -f "$d" ] && grep -qi '^linear' "$d" 2>/dev/null; then st="done"; else st="...."; fi
     printf '  ZAP0(log10)=%-5s  ZAP0=%-8.0f  %s\n' "$v" "$("$PY" -c "print(10**$v)")" "$st"
     i=$((i+1))
@@ -188,7 +224,7 @@ fi
 
 # ------------------------------------------------------------------- report --
 if [ "$MODE" = report ]; then
-  GRID="$ALLGRID" "$PY" - <<'PYREP'
+  GRID="$ALLGRID" PFX="$PFX" "$PY" - <<'PYREP'
 import os, sys, glob
 sys.path.insert(0, os.path.expanduser('~/CD16_NK92_project/filesCC'))
 # clear any BOOT_* that would perturb the import-time config parsing
@@ -198,10 +234,11 @@ import bootstrap_pzap as BP
 import numpy as np, json
 
 grid = os.environ['GRID'].split()
+PFX = os.environ.get('PFX', 'zs')
 KZP_TO_PHYS = 0.03           # kzp = KZP_MULT * 0.03  (uM s)^-1
 rows = []
 for i, v in enumerate(grid):
-    root = os.path.expanduser('~/boot_pzap_zs%02d_pinZAP0' % i)
+    root = os.path.expanduser('~/boot_pzap_%s%02d_pinZAP0' % (PFX, i))
     d = os.path.join(root, 'emp000')
     r = BP.parse_result(d)
     zap = 10.0**float(v)
@@ -278,6 +315,28 @@ echo "  at each point ZAP0 is PINNED and lig0,kd10,SYK0,KZP_MULT,KPR_MULT refit"
 echo
 
 echo "--- preflight ---"
+# GUARD: bootstrap_pzap.build_one starts each point with
+#     if os.path.isdir(dst): shutil.rmtree(dst)
+# so resubmitting while jobs are live DELETES the working directory out from
+# under them and they die.  That already happened once (8679684-89 were wiped
+# by a rerun).  Refuse unless the user really means it.
+nrun=$(squeue -u "$USER" -h -o '%j' 2>/dev/null | grep -c '^bpemp' || true)
+if [ "${nrun:-0}" -gt 0 ] && [ "${FORCE:-0}" != "1" ]; then
+  echo "  STOP: $nrun pZAP job(s) are still in the queue."
+  echo "        Submitting now would delete their working directories and kill"
+  echo "        them, losing the progress they have made."
+  echo
+  echo "        To look at them instead:"
+  echo "           bash \$0 status      bash \$0 report      bash \$0 logs"
+  echo
+  echo "        If you really do want to scrap them and start over:"
+  echo "           scancel -u $USER --name=bpemp000     # then resubmit"
+  echo "        or force it in one step:"
+  echo "           FORCE=1 bash \$0 submit"
+  exit 1
+fi
+[ "${nrun:-0}" -gt 0 ] && echo "  warn FORCE=1 -- clobbering $nrun running job(s) on purpose"
+
 SRCD=$HOME/NK92_fit_v77
 XL=/home/gddaslab/share/Varun_Indrani/estimate_params_pzap/data/pZAP70_Tyr493_Tyr292_original_and_averages.xlsx
 fail=0
@@ -328,9 +387,9 @@ i=0; nok=0; nbad=0
 for v in $GRID; do
   t=$(tag_of "$v")
   z=$("$PY" -c "print(round(10**$v))")
-  echo "--- ZAP0(log10)=$v  (ZAP0=$z)  tag=_zs$t"
+  echo "--- ZAP0(log10)=$v  (ZAP0=$z)  tag=_${PFX}$t"
   log=$(mktemp)
-  BOOT_TAG="_zs$t" BOOT_PIN="ZAP0" BOOT_CENTRE="ZAP0=$v" \
+  BOOT_TAG="_${PFX}$t" BOOT_PIN="ZAP0" BOOT_CENTRE="ZAP0=$v" \
     "$PY" "$BP" submit 0 0 0 >"$log" 2>&1
   rc=$?
   jid=$(grep -o 'Submitted batch job [0-9]*' "$log" | head -1 | awk '{print $NF}')
