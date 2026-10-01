@@ -176,18 +176,65 @@ PYREP
 fi
 
 # ------------------------------------------------------------------- submit --
+# NOTE ON A BUG THAT COST A NIGHT: this loop used to pipe each point through
+#   grep -E 'emp000|Submitted|ERROR|box:'
+# A Python traceback contains none of those words -- "FileNotFoundError" does
+# not match the case-sensitive 'ERROR' -- so when submission failed, the filter
+# ate the error and the script still printed "submitted 8 scan points".  The
+# queue was empty and nothing said why.  Output is now shown in full, and the
+# script VERIFIES that sbatch actually returned a job id before claiming
+# anything was submitted.
 echo "=============== POINT 2: ZAP0 profile scan ==============="
 echo "  grid log10(ZAP0): $GRID"
 echo "  budget: ${BOOT_PARTICLES}x${BOOT_ITERS}  N_REPS=$BOOT_NREPS  window 0-${BOOT_TMAX}s"
-echo "  at each point ZAP0 is PINNED and lig0,kdl0,SYK0,KZP_MULT,KPR_MULT refit"
+echo "  at each point ZAP0 is PINNED and lig0,kd10,SYK0,KZP_MULT,KPR_MULT refit"
 echo
-i=0
+
+echo "--- preflight ---"
+SRCD=$HOME/NK92_fit_v77
+XL=/home/gddaslab/share/Varun_Indrani/estimate_params_pzap/data/pZAP70_Tyr493_Tyr292_original_and_averages.xlsx
+fail=0
+[ -d "$SRCD" ]  && echo "  ok   source tree   $SRCD" || { echo "  FAIL source tree MISSING: $SRCD"; fail=1; }
+[ -f "$XL" ]    && echo "  ok   day-level xlsx" || { echo "  FAIL xlsx MISSING: $XL"; fail=1; }
+command -v sbatch >/dev/null && echo "  ok   sbatch on PATH" || { echo "  FAIL sbatch not found (are you on a login node?)"; fail=1; }
+"$PY" -c "import sys; sys.path.insert(0,'$F'); import bootstrap_pzap" 2>&1 \
+  && echo "  ok   bootstrap_pzap imports" || { echo "  FAIL bootstrap_pzap does not import (full error above)"; fail=1; }
+avail=$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2{print int($4/1048576)}')
+[ -n "$avail" ] && echo "  note ${avail} GB free in \$HOME (each grid point copies the v77 tree)"
+[ "$fail" = 0 ] || { echo; echo "PREFLIGHT FAILED -- nothing submitted."; exit 1; }
+echo
+
+i=0; nok=0; nbad=0
 for v in $GRID; do
   t=$(printf '%02d' "$i")
-  echo "--- ZAP0(log10)=$v  (ZAP0=$("$PY" -c "print(round(10**$v))"))  tag=_zs$t"
+  z=$("$PY" -c "print(round(10**$v))")
+  echo "--- ZAP0(log10)=$v  (ZAP0=$z)  tag=_zs$t"
+  log=$(mktemp)
   BOOT_TAG="_zs$t" BOOT_PIN="ZAP0" BOOT_CENTRE="ZAP0=$v" \
-    "$PY" "$BP" submit 0 0 0 2>&1 | grep -E 'emp000|Submitted|ERROR|box:' | head -4
+    "$PY" "$BP" submit 0 0 0 >"$log" 2>&1
+  rc=$?
+  jid=$(grep -o 'Submitted batch job [0-9]*' "$log" | head -1 | awk '{print $NF}')
+  if [ "$rc" -ne 0 ] || [ -z "$jid" ]; then
+    nbad=$((nbad+1))
+    echo "    SUBMIT FAILED (exit $rc).  Full output:"
+    sed 's/^/      /' "$log"
+  else
+    nok=$((nok+1))
+    echo "    submitted job $jid"
+  fi
+  rm -f "$log"
   i=$((i+1))
-  echo
 done
-echo "submitted ${i} scan points.   later:  bash \$0 status   then   bash \$0 report"
+echo
+echo "=================================================="
+echo "  submitted OK : $nok of $i"
+[ "$nbad" -gt 0 ] && echo "  FAILED       : $nbad   (error text printed above each one)"
+if [ "$nok" -gt 0 ]; then
+  echo
+  echo "  check:   squeue -u $USER"
+  echo "  later:   bash \$0 status    then    bash \$0 report"
+else
+  echo
+  echo "  NOTHING was submitted.  Read the error above before re-running."
+fi
+echo "=================================================="
