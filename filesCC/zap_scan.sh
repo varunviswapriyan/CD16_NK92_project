@@ -197,6 +197,39 @@ fail=0
 [ -d "$SRCD" ]  && echo "  ok   source tree   $SRCD" || { echo "  FAIL source tree MISSING: $SRCD"; fail=1; }
 [ -f "$XL" ]    && echo "  ok   day-level xlsx" || { echo "  FAIL xlsx MISSING: $XL"; fail=1; }
 command -v sbatch >/dev/null && echo "  ok   sbatch on PATH" || { echo "  FAIL sbatch not found (are you on a login node?)"; fail=1; }
+
+# openpyxl: pandas needs it to read the day-level .xlsx, and read_days() is the
+# FIRST thing build() calls -- so without it all 8 points die before anything is
+# built.  It was present for the earlier runs and went missing later (most
+# likely collateral from `pip install flowkit` resolving its own deps), so this
+# repairs it rather than just complaining.
+if "$PY" -c "import openpyxl" >/dev/null 2>&1; then
+  echo "  ok   openpyxl   $("$PY" -c 'import openpyxl;print(openpyxl.__version__)' 2>/dev/null)"
+else
+  echo "  --   openpyxl MISSING -- installing into $("$PY" -c 'import sys;print(sys.prefix)')"
+  "$PY" -m pip install --quiet openpyxl 2>&1 | tail -3
+  if "$PY" -c "import openpyxl" >/dev/null 2>&1; then
+    echo "  ok   openpyxl now $("$PY" -c 'import openpyxl;print(openpyxl.__version__)')"
+  else
+    echo "  FAIL pip could not install openpyxl.  Try:"
+    echo "         conda install -n CD16_v2 -c conda-forge openpyxl"
+    fail=1
+  fi
+fi
+
+# the rest of the env, so a broken resolver shows up here and not 8 hours in
+"$PY" - <<'PYCHK' || fail=1
+import importlib, sys
+bad = []
+for m in ('numpy', 'pandas', 'scipy', 'pyswarms'):
+    try:
+        v = getattr(importlib.import_module(m), '__version__', '?')
+        print('  ok   %-9s %s' % (m, v))
+    except Exception as e:
+        print('  FAIL %-9s %s' % (m, e)); bad.append(m)
+sys.exit(1 if bad else 0)
+PYCHK
+
 "$PY" -c "import sys; sys.path.insert(0,'$F'); import bootstrap_pzap" 2>&1 \
   && echo "  ok   bootstrap_pzap imports" || { echo "  FAIL bootstrap_pzap does not import (full error above)"; fail=1; }
 avail=$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2{print int($4/1048576)}')
