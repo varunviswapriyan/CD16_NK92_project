@@ -50,7 +50,28 @@ BP=$F/bootstrap_pzap.py
 # log10(ZAP0) grid.  2.14 = the current fitted value (~138); top = 4.5 (~31600),
 # the same ceiling das_rerun.sh used.  Evenly spaced so the trade-off, if there
 # is one, shows as a straight kzp-vs-ZAP0 line on a log-log axis.
-GRID=${GRID:-"2.14 2.45 2.75 3.05 3.35 3.70 4.10 4.50"}
+#
+# ALLGRID is the CANONICAL list and fixes each point's tag (_zs00 .. _zs07).
+# GRID is only which points to submit.  Tags come from a value's position in
+# ALLGRID, never from its position in GRID -- otherwise resubmitting a subset
+# like GRID="4.10 4.50" would reuse _zs00/_zs01 and overwrite finished points.
+ALLGRID="2.14 2.45 2.75 3.05 3.35 3.70 4.10 4.50"
+GRID=${GRID:-$ALLGRID}
+
+# memory per point.  NFsim holds every molecule and complex explicitly, so the
+# high-ZAP0 points need much more than the 64G default.
+export BOOT_MEM=${BOOT_MEM:-64G}
+
+# tag index for a log10 value = its position in ALLGRID (stable across subsets)
+tag_of() {
+  local k=0 w
+  for w in $ALLGRID; do
+    [ "$w" = "$1" ] && { printf '%02d' "$k"; return 0; }
+    k=$((k+1))
+  done
+  # not in the canonical grid: derive a stable tag from the value itself
+  printf 'v%s' "$(printf '%s' "$1" | tr -d '.')"
+}
 
 # a warm-started 5-parameter refit is far easier than the free 6-param search,
 # so a smaller budget than the convergence run is enough.  Override if needed.
@@ -80,16 +101,82 @@ fi
 echo "using $PY"
 echo
 
-case "$MODE" in submit|status|report) ;; *) echo "use submit|status|report"; exit 2 ;; esac
+case "$MODE" in submit|status|report|logs) ;; *) echo "use submit|status|report|logs"; exit 2 ;; esac
+
+# --------------------------------------------------------------------- logs --
+# Why did a grid point die?  Slurm's accounting record gives the verdict
+# (OUT_OF_MEMORY / TIMEOUT / FAILED + exit code) and the job log gives the text.
+# Points were observed dying in ZAP0 order, highest first, which is the
+# signature of NFsim running out of memory: it tracks every molecule and
+# complex individually, so raising ZAP0 from 138 to 31623 can blow the species
+# count up combinatorially.
+if [ "$MODE" = logs ]; then
+  echo "=============== slurm accounting (today) ==============="
+  if command -v sacct >/dev/null; then
+    sacct -u "$USER" --format=JobID%14,JobName%12,State%18,ExitCode%8,MaxRSS%10,Elapsed%10 \
+          -S today 2>/dev/null | grep -Ev '\.(batch|extern)' | tail -25
+  else
+    echo "  sacct not available"
+  fi
+
+  echo
+  echo "=============== per grid point ==============="
+  i=0; noom=0; ndone=0; nfail=0
+  for v in $ALLGRID; do
+    t=$(tag_of "$v")
+    d="$HOME/boot_pzap_zs${t}_pinZAP0/emp000"
+    lg="$d/emp000.log"
+    z=$("$PY" -c "print(round(10**$v))" 2>/dev/null)
+    printf -- '--- ZAP0=%-7s tag=_zs%s\n' "$z" "$t"
+    if [ ! -d "$d" ]; then
+      echo "    no directory -- never built"; nfail=$((nfail+1)); i=$((i+1)); continue
+    fi
+    if [ -f "$d/estimate_params_pzap_cleaned_up/analysis_param_residue.dat" ] \
+       && grep -qi '^linear' "$d/estimate_params_pzap_cleaned_up/analysis_param_residue.dat" 2>/dev/null; then
+      echo "    FINISHED (has a fitted result)"; ndone=$((ndone+1)); i=$((i+1)); continue
+    fi
+    if [ ! -f "$lg" ]; then
+      echo "    no log at $lg"; nfail=$((nfail+1)); i=$((i+1)); continue
+    fi
+    # classify
+    if grep -qiE 'out of memory|oom-kill|MemoryError|std::bad_alloc|Killed' "$lg" 2>/dev/null; then
+      echo "    >>> OUT OF MEMORY <<<"; noom=$((noom+1))
+    elif grep -qiE 'DUE TO TIME LIMIT|CANCELLED' "$lg" 2>/dev/null; then
+      echo "    >>> HIT THE WALLTIME <<<"
+    fi
+    echo "    last lines of $lg:"
+    tail -12 "$lg" 2>/dev/null | sed 's/^/      /'
+    nfail=$((nfail+1))
+    i=$((i+1))
+  done
+
+  echo
+  echo "=================================================="
+  echo "  finished $ndone   not finished $nfail   of $i"
+  if [ "$noom" -gt 0 ]; then
+    cat <<'EOF'
+
+  DIAGNOSIS: at least one point ran out of memory.  NFsim holds every molecule
+  and complex explicitly, so the high-ZAP0 points need far more RAM than the
+  64G the job asks for.  Two ways forward, both fine:
+
+    1. give the big points more memory and rerun just those
+         BOOT_MEM=250G GRID="3.70 4.10 4.50" bash $0 submit
+    2. accept the range that works.  Points from 138 to ~5000 already span 36x,
+       which is enough to see whether SSR is flat and whether kzp tracks
+       1/ZAP0.  The answer to Das's point 2 does not need the top of the grid.
+EOF
+  fi
+  echo "=================================================="
+  exit 0
+fi
 
 # index for a grid value: its position, zero-padded, so tags are stable
-idx_of() { local i=0 v; for v in $GRID; do [ "$v" = "$1" ] && { printf '%02d' "$i"; return; }; i=$((i+1)); done; }
-
 # ------------------------------------------------------------------- status --
 if [ "$MODE" = status ]; then
   i=0
-  for v in $GRID; do
-    t=$(printf '%02d' "$i")
+  for v in $ALLGRID; do
+    t=$(tag_of "$v")
     d="$HOME/boot_pzap_zs${t}_pinZAP0/emp000/estimate_params_pzap_cleaned_up/analysis_param_residue.dat"
     if [ -f "$d" ] && grep -qi '^linear' "$d" 2>/dev/null; then st="done"; else st="...."; fi
     printf '  ZAP0(log10)=%-5s  ZAP0=%-8.0f  %s\n' "$v" "$("$PY" -c "print(10**$v)")" "$st"
@@ -101,7 +188,7 @@ fi
 
 # ------------------------------------------------------------------- report --
 if [ "$MODE" = report ]; then
-  GRID="$GRID" "$PY" - <<'PYREP'
+  GRID="$ALLGRID" "$PY" - <<'PYREP'
 import os, sys, glob
 sys.path.insert(0, os.path.expanduser('~/CD16_NK92_project/filesCC'))
 # clear any BOOT_* that would perturb the import-time config parsing
@@ -239,7 +326,7 @@ echo
 
 i=0; nok=0; nbad=0
 for v in $GRID; do
-  t=$(printf '%02d' "$i")
+  t=$(tag_of "$v")
   z=$("$PY" -c "print(round(10**$v))")
   echo "--- ZAP0(log10)=$v  (ZAP0=$z)  tag=_zs$t"
   log=$(mktemp)

@@ -72,6 +72,28 @@ HALF = float(os.environ.get('BOOT_HALF', '0.60'))  # warm-start half-width in lo
 ORIG_B = {'lig0': (1.4, 2.4), 'kdl0': (-4.5, -2.3), 'ZAP0': (2.0, 3.2),
           'SYK0': (0.5, 2.5), 'KZP_MULT': (-0.3, 1.0), 'KPR_MULT': (-1.0, 1.0)}
 
+# --- widen a parameter's ORIGINAL bounds, and/or let it ignore the warm start --
+#   BOOT_BOUNDS="ZAP0=1.7:4.5,SYK0=0.5:4.0"   log10, replaces ORIG_B
+#   BOOT_FREE="ZAP0,SYK0"                     search the FULL bound range
+# Widening bounds alone does nothing: the box is v77 +/- BOOT_HALF clipped to
+# ORIG_B, so a parameter stays pinned near its old value however wide the
+# bounds are.  BOOT_FREE is what actually lets it move.
+FREE = [x.strip() for x in os.environ.get('BOOT_FREE', '').split(',') if x.strip()]
+_BND_SRC = {}
+for _kv in os.environ.get('BOOT_BOUNDS', '').split(','):
+    if '=' not in _kv or ':' not in _kv:
+        continue
+    _k, _rng = _kv.split('=', 1)
+    _lo, _hi = _rng.split(':', 1)
+    _k = _k.strip()
+    try:
+        _lo, _hi = float(_lo), float(_hi)
+    except ValueError:
+        raise SystemExit('BOOT_BOUNDS: bad range %r for %s' % (_rng, _k))
+    if _hi <= _lo:
+        raise SystemExit('BOOT_BOUNDS: %s has hi <= lo (%s, %s)' % (_k, _lo, _hi))
+    _BND_SRC[_k] = (_lo, _hi)
+
 def canon(n):
     """The config/.bngl spell it kd10 (digit one); our tables say kdl0."""
     n = n.strip()
@@ -96,6 +118,24 @@ for _kv in os.environ.get('BOOT_CENTRE', '').split(','):
         except ValueError:
             raise SystemExit('BOOT_CENTRE: %r is not a number for %s' % (_v, _k))
         _CENTRE_SRC[_k] = float(_v)
+for _k, _v in list(_BND_SRC.items()):
+    _c = canon(_k)
+    if _c not in ORIG_B:
+        raise SystemExit('BOOT_BOUNDS: unknown parameter %r (known: %s)'
+                         % (_k, sorted(ORIG_B)))
+    ORIG_B[_c] = _v
+    if _c in MULT_BOUNDS:
+        MULT_BOUNDS[_c] = _v
+FREE = [canon(x) for x in FREE]
+for _f in FREE:
+    if _f not in ORIG_B:
+        raise SystemExit('BOOT_FREE: unknown parameter %r (known: %s)'
+                         % (_f, sorted(ORIG_B)))
+if _BND_SRC:
+    print('bound overrides (log10): %s'
+          % ', '.join('%s=[%g,%g]' % (k, v[0], v[1]) for k, v in sorted(_BND_SRC.items())))
+if FREE:
+    print('searched over the FULL bound range (no warm start): %s' % ', '.join(FREE))
 if _CENTRE_SRC:
     print('centre overrides (log10): %s'
           % ', '.join('%s=%g' % (k, v) for k, v in sorted(_CENTRE_SRC.items())))
@@ -237,6 +277,11 @@ def build_one(kind, i, days):
             warmed.append(name + '(pinned)')
             continue
         lo, hi = ORIG_B.get(cn, MULT_BOUNDS.get(cn, (-9.0, 9.0)))
+        if cn in FREE:                     # full range: the point of widening
+            c['LB'][j] = round(lo, 4)
+            c['UB'][j] = round(hi, 4)
+            warmed.append(name + '(free)')
+            continue
         c['LB'][j] = round(max(lo, v - HALF), 4)
         c['UB'][j] = round(min(hi, v + HALF), 4)
         warmed.append(name)
@@ -257,6 +302,10 @@ def build_one(kind, i, days):
                                            for j, n in enumerate(c['PARAMS'])}))
 
     walltime = os.environ.get('BOOT_WALLTIME', '8:00:00')
+    # NFsim holds every molecule and complex explicitly, so a run with a large
+    # ZAP0/SYK0 needs far more RAM than the default.  BOOT_MEM makes that
+    # adjustable instead of requiring an edit here.
+    mem = os.environ.get('BOOT_MEM', '64G')
     run = os.path.join(BOOT_ROOT, f'run_{tag}.sh')
     with open(run, 'w') as f:
         f.write(f"""#!/bin/bash
@@ -264,7 +313,7 @@ def build_one(kind, i, days):
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
-#SBATCH --mem=64G
+#SBATCH --mem={mem}
 #SBATCH --time={walltime}
 #SBATCH --output={dst}/{tag}.log
 {ENV}
