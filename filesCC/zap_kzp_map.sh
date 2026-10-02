@@ -40,13 +40,30 @@ BP=$F/bootstrap_pzap.py
 # log10(ZAP0).  Stops at 3.70: at 4.10 and above NFsim cannot simulate the
 # model at all (every parameter set returns a non-finite cost and pyswarms
 # dies), so those points carry no information and are simply not run.
-ZGRID=${ZGRID:-"2.14 2.45 2.75 3.05 3.35 3.70"}
-
 # log10(KZP_MULT).  kzp = KZP_MULT * 0.03 (uM s)^-1.  0.3424 is the v77/JI
 # value (kzp = 0.066).  The grid runs ~2 decades BELOW it, which is what a
-# product-preserving trade-off would need over this ZAP0 range, and a little
-# above.
-KGRID=${KGRID:-"-1.50 -1.00 -0.50 0.00 0.3424 0.70 1.00"}
+# product-preserving trade-off would need over this ZAP0 range, and 3 columns
+# above it, added after the first run put 4 of 6 row minima on the right edge.
+#
+# KALL / ZALL are CANONICAL and fix each cell's directory name.  KGRID / ZGRID
+# are only which cells to submit.  Indices come from a value's position in the
+# canonical list, so submitting just the new columns
+#     KGRID="1.30 1.60 1.90" bash $0 submit
+# writes to km**_07/08/09 and CANNOT overwrite the 42 cells already finished.
+ZALL="2.14 2.45 2.75 3.05 3.35 3.70"
+KALL="-1.50 -1.00 -0.50 0.00 0.3424 0.70 1.00 1.30 1.60 1.90"
+KGRID=${KGRID:-$KALL}
+ZGRID=${ZGRID:-$ZALL}
+
+idx_in() {   # $1 = value, $2... = canonical list -> zero-padded position
+  local v="$1"; shift; local k=0 w
+  for w in "$@"; do
+    [ "$w" = "$v" ] && { printf '%02d' "$k"; return 0; }
+    k=$((k+1))
+  done
+  echo "ERROR: '$v' is not in the canonical list ($*)" >&2
+  return 1
+}
 
 # Only four parameters are refit per point (lig0, kd10, SYK0, KPR_MULT), all
 # warm-started, so a small budget is plenty and the fit is well conditioned.
@@ -77,7 +94,76 @@ fi
 echo "using $PY"
 echo
 
-case "$MODE" in submit|status|report) ;; *) echo "use submit|status|report"; exit 2 ;; esac
+case "$MODE" in submit|status|report|verify) ;; *)
+  echo "use submit|status|report|verify"; exit 2 ;; esac
+
+# ------------------------------------------------------------------- verify --
+# Shows that NOTHING of Indrani's model was modified.  Every grid cell is a
+# straight copy of ~/NK92_fit_v77; the ONLY file that differs is v_config.json,
+# and the only thing changed inside it is which parameters are held fixed and
+# over what bounds -- which is the mechanism her own code provides.  The .bngl
+# rules, the rate constants and her fitting script are byte-identical.
+#
+# Run this before sending results to anyone who might reasonably ask
+# "did you change my model?"
+if [ "$MODE" = verify ]; then
+  SRCD=$HOME/NK92_fit_v77
+  SUB=estimate_params_pzap_cleaned_up
+  CELL=$(ls -d "$HOME"/boot_pzap_km*_pinZAP0_KZP_MULT 2>/dev/null | head -1)
+  [ -n "$CELL" ] || { echo "no grid cell found -- run submit first"; exit 1; }
+  echo "=============== did we modify her model? ==============="
+  echo "  reference : $SRCD/$SUB"
+  echo "  grid cell : $CELL/emp000/$SUB"
+  echo
+  echo "--- every file that DIFFERS from her original ---"
+  diff -rq "$SRCD/$SUB" "$CELL/emp000/$SUB" 2>/dev/null \
+    | grep -v '^Only in' | sed 's/^/  /' || true
+  echo
+  echo "--- her model rules and rates (.bngl): byte-for-byte check ---"
+  same=1
+  for f in "$SRCD/$SUB"/*.bngl; do
+    [ -f "$f" ] || continue
+    b=$(basename "$f")
+    o="$CELL/emp000/$SUB/$b"
+    if [ ! -f "$o" ]; then echo "  $b  MISSING in the cell"; same=0
+    elif cmp -s "$f" "$o"; then echo "  $b  identical"
+    else echo "  $b  *** DIFFERS ***"; same=0; fi
+  done
+  echo
+  echo "--- her fitting script: byte-for-byte check ---"
+  for b in pzap_param_estimation_NK92.py; do
+    o="$CELL/emp000/$SUB/$b"
+    if [ -f "$SRCD/$SUB/$b" ] && [ -f "$o" ]; then
+      cmp -s "$SRCD/$SUB/$b" "$o" && echo "  $b  identical" \
+        || { echo "  $b  *** DIFFERS ***"; same=0; }
+    fi
+  done
+  echo
+  echo "--- what WE set in v_config.json (the only intended change) ---"
+  "$PY" - "$CELL/emp000/$SUB/v_config.json" <<'PYV'
+import json, sys
+c = json.load(open(sys.argv[1]))
+print('  parameters and their search bounds (log10):')
+for j, n in enumerate(c['PARAMS']):
+    lo, hi = c['LB'][j], c['UB'][j]
+    tag = 'PINNED (held fixed at this value)' if abs(hi - lo) < 1e-9 else 'refit in this range'
+    print('    %-10s [%8.4f, %8.4f]   %s' % (n, lo, hi, tag))
+print('  held fixed outside the search : %s' % c.get('FIXED', {}))
+print('  NFsim replicates per evaluation: %s' % c.get('N_REPS'))
+PYV
+  echo
+  echo "=================================================="
+  if [ "$same" = 1 ]; then
+    echo "  Her .bngl model and her fitting script are UNCHANGED."
+    echo "  Only v_config.json differs, and only in which parameters are held"
+    echo "  fixed and over what bounds -- using her own config mechanism."
+  else
+    echo "  SOMETHING DIFFERS beyond v_config.json -- read the list above"
+    echo "  before reporting anything."
+  fi
+  echo "=================================================="
+  exit 0
+fi
 
 root_of() {  # $1 = z index, $2 = k index
   printf '%s/boot_pzap_km%02d_%02d_pinZAP0_KZP_MULT' "$HOME" "$1" "$2"
@@ -86,9 +172,9 @@ root_of() {  # $1 = z index, $2 = k index
 # ------------------------------------------------------------------- status --
 if [ "$MODE" = status ]; then
   zi=0; done=0; tot=0
-  for z in $ZGRID; do
+  for z in $ZALL; do
     ki=0; line=""
-    for k in $KGRID; do
+    for k in $KALL; do
       f="$(root_of $zi $ki)/emp000/estimate_params_pzap_cleaned_up/analysis_param_residue.dat"
       if [ -f "$f" ] && grep -qi '^linear' "$f" 2>/dev/null; then line="$line X"; done=$((done+1))
       else line="$line ."; fi
@@ -105,7 +191,7 @@ fi
 
 # ------------------------------------------------------------------- report --
 if [ "$MODE" = report ]; then
-  ZGRID="$ZGRID" KGRID="$KGRID" "$PY" - <<'PYREP'
+  ZGRID="$ZALL" KGRID="$KALL" "$PY" - <<'PYREP'
 import os, sys
 sys.path.insert(0, os.path.expanduser('~/CD16_NK92_project/filesCC'))
 for k in list(os.environ):
@@ -225,12 +311,13 @@ echo "  both ZAP0 and KZP_MULT are PINNED at each point; lig0, kd10, SYK0 and"
 echo "  KPR_MULT get a warm-started ${BOOT_PARTICLES}x${BOOT_ITERS} refit"
 echo
 
-zi=0; nok=0; nbad=0
+nok=0; nbad=0
 for z in $ZGRID; do
-  ki=0
+  zi=$(idx_in "$z" $ZALL) || exit 1
   for k in $KGRID; do
+    ki=$(idx_in "$k" $KALL) || exit 1
     log=$(mktemp)
-    BOOT_TAG="_km$(printf '%02d_%02d' $zi $ki)" \
+    BOOT_TAG="_km${zi}_${ki}" \
     BOOT_PIN="ZAP0,KZP_MULT" \
     BOOT_CENTRE="ZAP0=$z,KZP_MULT=$k" \
       "$PY" "$BP" submit 0 0 0 >"$log" 2>&1
@@ -245,9 +332,7 @@ for z in $ZGRID; do
       printf '  ZAP0=%-7s kzp_mult=%-8s job %s\n' "$z" "$k" "$jid"
     fi
     rm -f "$log"
-    ki=$((ki+1))
   done
-  zi=$((zi+1))
 done
 
 echo
