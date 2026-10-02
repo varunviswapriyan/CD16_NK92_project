@@ -46,7 +46,76 @@ fi
 [ -n "$PY" ] || { echo "ERROR: no python with numpy/pandas"; exit 1; }
 echo "using $PY"; echo
 
-case "$MODE" in submit|status|report) ;; *) echo "use submit|status|report"; exit 2 ;; esac
+case "$MODE" in submit|status|report|diag) ;; *)
+  echo "use submit|status|report|diag"; exit 2 ;; esac
+
+# --------------------------------------------------------------------- diag --
+# Two things the report flagged but could not explain:
+#   1. the Ca 'orig' bootstrap produced no samples at all
+#   2. the pZAP CI table failed ci_report's convergence gate -- and those are
+#      the intervals already sent to Das, so the reason matters
+# This shows both, including the ci_report section the report crops out.
+if [ "$MODE" = diag ]; then
+  echo "#############################################################"
+  echo "# 1. DID THE Ca 'orig' BOOTSTRAP RUN AT ALL?                #"
+  echo "#############################################################"
+  OD="$CADIR/out_boot_ca2/orig"
+  echo "  dir: $OD"
+  if [ -d "$OD" ]; then
+    echo "  json files: $(ls "$OD"/boot_*.json 2>/dev/null | wc -l)"
+    echo "  samples with sample>0 and ok=true:"
+    "$PY" - "$OD" <<'PYD'
+import json, glob, os, sys
+ok = bad = ref = 0
+errs = []
+for f in sorted(glob.glob(os.path.join(sys.argv[1], 'boot_*.json'))):
+    try:
+        r = json.load(open(f))
+    except Exception as e:
+        errs.append((os.path.basename(f), 'unreadable %s' % e)); continue
+    if not r.get('ok'):
+        bad += 1; errs.append((os.path.basename(f), r.get('error', '?')[:120])); continue
+    if r.get('sample', 0) == 0: ref += 1
+    else: ok += 1
+print('    reference (sample 0) : %d' % ref)
+print('    bootstrap samples ok : %d' % ok)
+print('    failed               : %d' % bad)
+for n, e in errs[:5]:
+    print('      %s  %s' % (n, e))
+PYD
+  else
+    echo "  DIRECTORY DOES NOT EXIST -- the submit never created it."
+  fi
+  echo
+  echo "  --- most recent Ca job logs ---"
+  ls -t "$CADIR/logs_boot_ca2"/orig_*.log 2>/dev/null | head -2 | while read -r l; do
+    echo "  == $l"; tail -15 "$l" | sed 's/^/     /'
+  done
+  [ -d "$CADIR/logs_boot_ca2" ] || echo "  (no logs_boot_ca2 directory)"
+
+  echo
+  echo "#############################################################"
+  echo "# 2. WHY DID THE pZAP CI TABLE FAIL ITS CONVERGENCE GATE?   #"
+  echo "#############################################################"
+  echo "  (this is the ci_report section that 'report' crops out)"
+  echo
+  BOOT_TAG=_conv "$PY" "$F/ci_report.py" 2>&1 | sed -n '1,/2. INTERVALS/p' | sed 's/^/  /'
+
+  echo
+  echo "#############################################################"
+  echo "# 3. WHAT IS IN THE QUEUE NOW                               #"
+  echo "#############################################################"
+  squeue -u "$USER" 2>/dev/null | head -15
+  echo
+  n=0
+  for d in "$HOME"/boot_pzap_km*_pinZAP0_KZP_MULT; do
+    [ -d "$d" ] || continue
+    f="$d/emp000/estimate_params_pzap_cleaned_up/analysis_param_residue.dat"
+    [ -f "$f" ] && grep -qi '^linear' "$f" 2>/dev/null && n=$((n+1))
+  done
+  echo "  kzp map cells finished : $n of 60"
+  exit 0
+fi
 
 # ------------------------------------------------------------------- status --
 if [ "$MODE" = status ]; then

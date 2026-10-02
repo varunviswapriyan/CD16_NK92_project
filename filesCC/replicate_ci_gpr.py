@@ -98,7 +98,7 @@ OUTPUT_ROOT = "ci_replication"
 # (DevTools > Network). Paste it below.
 # ---------------------------------------------------------------------------
 
-HNP_NYT = {"moniker": "hnpnewyorktimes",
+HNP_NYT = {"moniker": "hnpnewyorktimeswindex",
            "name": "ProQuest Historical Newspapers: The New York Times with Index"}
 HNP_WAPO = {"moniker": "hnpwashingtonpost",
             "name": "ProQuest Historical Newspapers: The Washington Post"}
@@ -802,6 +802,104 @@ def find_ft(corpus):
     print("  If nothing appears, FT is not in these products: add its database to FT_PRODUCTS.")
 
 
+HNP_NYT_CANDIDATES = [
+    # hnp + variants
+    "hnpnewyorktimes", "hnpnewyorktimeswithindex", "hnpnewyorktimes_withindex",
+    "hnpnewyorktimesindex", "hnpnewyorktimes-withindex",
+    "hnpnytimes", "hnpnytimeswithindex", "hnpnytimesindex",
+    "hnpnyt", "hnpnytindex", "hnpnytwithindex",
+    "hnpthenewyorktimes", "hnpthenewyorktimeswithindex",
+    "hnp_nyt", "hnp_newyorktimes", "hnp_newyorktimes_withindex",
+    # pqhnp + variants
+    "pqhnpnewyorktimes", "pqhnpnyt", "pqhnpnytimes",
+    # without hnp prefix (API guide shows plain "nytimes")
+    "nytimes", "nytimeshistorical", "nytimeshist", "nytimes_hist",
+    "nytimeswithindex", "nytimes_withindex", "nytimesindex",
+    "newyorktimes", "newyorktimeshistorical", "newyorktimeshist",
+    "newyorktimeswithindex", "newyorktimes_withindex",
+    "thenewyorktimes", "thenewyorktimeswithindex",
+    # product-code style
+    "nyt", "nythist", "nyt_hist", "nyt_historical", "nyt_withindex",
+    "nytwithindex", "nytindex",
+    # ProQuest internal naming conventions sometimes seen
+    "proquesthnpnewyorktimes", "pq_hnp_nyt",
+    "pqthnpnyt", "pqhnp_nytimes",
+]
+
+
+def try_moniker_candidates(corpus):
+    """Try a list of candidate NYT historical monikers for Aug 1914, report counts.
+    The one that returns ~3,000 docs (and NOT a huge fallback number like 25k+) is right.
+    When the moniker is wrong, ProQuest silently falls back to a broader search and
+    returns a wildly inflated count. The correct NYT alone for Aug 1914 should be ~3,100
+    (matches C&I's 7,542 total minus WaPo 2,440 and ChiTrib 1,997)."""
+    print(f"\n[monikers] testing NYT historical moniker candidates for Aug 1914")
+    print(f"  looking for ~3,100 docs (close to 7,542 - 2,440 - 1,997)")
+    print(f"  anything above ~5,000 is probably a silent fallback (wrong moniker)")
+    print(f"  anything 0 is just invalid\n")
+    end_inclusive = detect_end_semantics(corpus)
+    s, e = month_bounds(1914, 8, end_inclusive)
+    for moniker in HNP_NYT_CANDIDATES:
+        solo = dict(corpus)
+        solo["products"] = [{"moniker": moniker,
+                             "name": "ProQuest Historical Newspapers: The New York Times with Index"}]
+        try:
+            c = get_count(solo, DENOM_QUERY, s, e)
+        except Exception as ex:
+            print(f"  {moniker:32s} ERROR: {type(ex).__name__}")
+            continue
+        tag = ""
+        if 2000 <= c <= 4500:
+            tag = "   <-- LIKELY CORRECT (matches expected ~3,100)"
+        elif c == 0:
+            tag = "   (invalid moniker)"
+        elif c > 10000:
+            tag = "   (silent fallback — wrong moniker)"
+        print(f"  {moniker:32s} {c:>10,}{tag}")
+    print(f"\n  Pick the one marked LIKELY CORRECT and update HNP_NYT at the top of the script.")
+    print(f"  If NONE match, see HNP_NYT_CANDIDATES at the top — add your own guesses and re-run.")
+
+
+def test_single_moniker(corpus, moniker):
+    """Interactive test of one candidate moniker. Reports the Aug 1914 denominator
+    count AND runs the combined-with-WaPo+ChiTrib test to detect silent fallbacks.
+    A real moniker satisfies: alone_count + 4437 == combined_count."""
+    end_inclusive = detect_end_semantics(corpus)
+    s, e = month_bounds(1914, 8, end_inclusive)
+    print(f"\n[test-moniker] {moniker!r} for Aug 1914\n")
+
+    solo = dict(corpus)
+    solo["products"] = [{"moniker": moniker, "name": "test"}]
+    try:
+        alone = get_count(solo, DENOM_QUERY, s, e)
+    except Exception as ex:
+        print(f"  alone: ERROR  {type(ex).__name__}: {ex}")
+        return
+    print(f"  alone                                  {alone:>8,}")
+
+    combo = dict(corpus)
+    combo["products"] = [{"moniker": moniker, "name": "test"}, HNP_WAPO, HNP_CHITRIB]
+    try:
+        combined = get_count(combo, DENOM_QUERY, s, e)
+    except Exception as ex:
+        print(f"  combined: ERROR  {type(ex).__name__}: {ex}")
+        return
+    expected_combined = alone + 4437 if alone < 50000 else None
+    print(f"  combined with WaPo+ChiTrib             {combined:>8,}")
+    if combined == 4437:
+        print(f"\n  *** FALLBACK: this moniker is silently ignored in multi-product queries.")
+        print(f"      (Combined dropped the moniker and summed only WaPo + ChiTrib = 4,437.)")
+        print(f"      This moniker is NOT valid, even though alone it returned {alone:,}.")
+    elif alone == 0:
+        print(f"\n  *** INVALID moniker (0 docs). Try another.")
+    elif expected_combined and abs(combined - expected_combined) < 50:
+        print(f"\n  *** VALID moniker! Combined = alone + 4,437 = {combined:,} as expected.")
+        print(f"      Update HNP_NYT at the top of the script to use moniker={moniker!r}.")
+    else:
+        print(f"\n  Unexpected: combined ({combined:,}) != alone + 4,437 ({expected_combined}). "
+              f"Likely valid but with overlap/filtering quirks — try it in a full probe.")
+
+
 def search_pub_titles(corpus, pattern):
     """Scan the corpus for every publication whose title matches PUB(pattern), by year.
     Pass a short word: `financial`, `FT`, `times`, `tribune`. The pubTitle facet lists what's
@@ -864,7 +962,7 @@ def list_titles(corpus, year=None):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["probe", "titles", "ft", "search", "run", "validate"])
+    ap.add_argument("command", choices=["probe", "titles", "ft", "search", "monikers", "test-moniker", "run", "validate"])
     ap.add_argument("corpora", nargs="+", choices=["hist", "recent"])
     ap.add_argument("--bench", help="C&I data_gpr_export.xls (or .csv) for validation")
     ap.add_argument("--year", type=int, help="year for `titles`")
@@ -888,6 +986,12 @@ def main(argv=None):
             find_ft(c)
         elif args.command == "search":
             search_pub_titles(c, args.pattern or "financial")
+        elif args.command == "monikers":
+            try_moniker_candidates(c)
+        elif args.command == "test-moniker":
+            if not args.pattern:
+                sys.exit("Pass --pattern <moniker>, e.g.  test-moniker hist --pattern hnpnytimes")
+            test_single_moniker(c, args.pattern)
         elif args.command == "run":
             df = build_indices(c, collect(c))
             if args.bench:
