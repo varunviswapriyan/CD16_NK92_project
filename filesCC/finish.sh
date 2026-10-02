@@ -46,8 +46,33 @@ fi
 [ -n "$PY" ] || { echo "ERROR: no python with numpy/pandas"; exit 1; }
 echo "using $PY"; echo
 
-case "$MODE" in submit|status|report|diag) ;; *)
-  echo "use submit|status|report|diag"; exit 2 ;; esac
+case "$MODE" in submit|status|report|diag|ca) ;; *)
+  echo "use submit|status|report|diag|ca"; exit 2 ;; esac
+
+# ----------------------------------------------------------------------- ca --
+# Submits ONLY the Ca 'orig' bootstrap.  `submit` would also rebuild the kzp map
+# cells, and rebuilding deletes and redoes them -- all 60 are already finished,
+# so this exists to avoid throwing that away.
+if [ "$MODE" = ca ]; then
+  [ -d "$CADIR" ] || { echo "ERROR: $CADIR not found"; exit 1; }
+  nrun=$(squeue -u "$USER" -h 2>/dev/null | wc -l)
+  [ "${nrun:-0}" -gt 0 ] && [ "${FORCE:-0}" != "1" ] && {
+    echo "STOP: $nrun job(s) still queued.  Wait, or FORCE=1 bash \$0 ca"; exit 1; }
+  echo "Ca bootstrap of HER model ('orig'), 50 samples."
+  echo "Each sample warm-starts from orig's converged reference (SSR 5.2060e4),"
+  echo "which is what rescued that variant when a cold start got it stuck."
+  echo
+  cd "$CADIR" || exit 1
+  CA_WARM_FROM=orig CA_STARTS=4 "$PY" "$F/bootstrap_ca2.py" submit 50 orig
+  rc=$?
+  echo
+  if [ "$rc" -ne 0 ]; then
+    echo "SUBMISSION FAILED (exit $rc) -- full output is above, nothing hidden."
+    exit 1
+  fi
+  echo "later:  bash \$0 status      then      bash \$0 report"
+  exit 0
+fi
 
 # --------------------------------------------------------------------- diag --
 # Two things the report flagged but could not explain:
