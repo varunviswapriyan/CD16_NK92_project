@@ -35,10 +35,12 @@ echo "== effective-diffusion model (~15 s)"
 FIRST_SEED="${SEEDS%% *}"
 jobs_file="$RES/jobs.txt"; : > "$jobs_file"
 for seed in $SEEDS; do
-  snap=""; [ "$seed" = "$FIRST_SEED" ] && snap="--snapshot-days $SNAP_DAYS"
-  echo "male       $MALE_INIT   male   $seed $snap"                     >> "$jobs_file"
-  echo "female     $FEMALE_INIT female $seed $snap"                     >> "$jobs_file"
-  echo "male_noseq $MALE_INIT   male   $seed --no-sequestration"         >> "$jobs_file"
+  snap=""; [ "$seed" = "$FIRST_SEED" ] && snap=" --snapshot-days $SNAP_DAYS"
+  # NB: no trailing spaces allowed — xargs -L joins a line ending in a blank
+  # with the next line, which would merge two runs into one command.
+  printf '%s\n' "male $MALE_INIT male ${seed}${snap}"             >> "$jobs_file"
+  printf '%s\n' "female $FEMALE_INIT female ${seed}${snap}"       >> "$jobs_file"
+  printf '%s\n' "male_noseq $MALE_INIT male ${seed} --no-sequestration" >> "$jobs_file"
 done
 
 echo "== $(wc -l < "$jobs_file") simulation runs, $JOBS at a time"
@@ -49,9 +51,12 @@ run_one() {
     echo "   skip $cond seed $seed (done)"; return 0
   fi
   echo "   start $cond seed $seed"
-  ./sex_bias_sim_v7 --init "$init" --sex "$sex" --days "$DAYS" --seed "$seed" \
-      --report-hours 6 --out "$out" "$@" > "$RES/logs/${cond}_s${seed}.log" 2>&1
-  echo "   done  $cond seed $seed"
+  if ./sex_bias_sim_v7 --init "$init" --sex "$sex" --days "$DAYS" --seed "$seed" \
+      --report-hours 6 --out "$out" "$@" > "$RES/logs/${cond}_s${seed}.log" 2>&1; then
+    echo "   done  $cond seed $seed"
+  else
+    echo "   FAILED $cond seed $seed — see $RES/logs/${cond}_s${seed}.log"
+  fi
 }
 export -f run_one; export RES DAYS
 xargs -P "$JOBS" -L 1 bash -c 'run_one "$@"' _ < "$jobs_file"
