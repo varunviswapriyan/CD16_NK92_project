@@ -53,23 +53,29 @@ def fig_timecourse():
         tcs = [load_tc(f) for f in files]
         n = min(len(t) for t in tcs)
         days = 14 + tcs[0]["time_days"][:n]
+        cancer = np.array([t["cancer"][:n] for t in tcs])               # absolute tumour size
         fold = np.array([t["cancer"][:n] / t["cancer"][0] for t in tcs])
         ifng = np.array([t["free_ifng"][:n] for t in tcs])
-        data[cond] = (days, fold, ifng, len(files))
+        data[cond] = (days, cancer, fold, ifng, len(files))
     if not data:
         print("no time-course files found"); return
+    # compare all conditions on the same time points (runs may still be going)
+    n_all = min(len(d[0]) for d in data.values())
+    data = {c: (d[0][:n_all], d[1][:, :n_all], d[2][:, :n_all], d[3][:, :n_all], d[4])
+            for c, d in data.items()}
 
+    # Left panel = absolute tumour size (cancer cell count), per Jayajit's request;
+    # right panel = free IFN-gamma. (Fold-change ratio is still written to summary.)
     fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-    for cond, (days, fold, ifng, nseed) in data.items():
+    for cond, (days, cancer, fold, ifng, nseed) in data.items():
         lab, col, ls = COND[cond]
-        for ax, y in ((axes[0], fold), (axes[1], ifng)):
-            m, s = y.mean(0), y.std(0)
+        for ax, y, scale in ((axes[0], cancer, 1e3), (axes[1], ifng, 1.0)):
+            m, sd = y.mean(0) / scale, y.std(0) / scale
             ax.plot(days, m, color=col, ls=ls, lw=2, label=f"{lab} (n={nseed})")
             if nseed > 1:
-                ax.fill_between(days, m - s, m + s, color=col, alpha=0.15, lw=0)
-    axes[0].axhline(1, color="#999", lw=0.8)
-    axes[0].set(xlabel="Day after tumour implantation", ylabel="Cancer cells (fold change from day 14)",
-                title="Tumour growth")
+                ax.fill_between(days, m - sd, m + sd, color=col, alpha=0.15, lw=0)
+    axes[0].set(xlabel="Day after tumour implantation",
+                ylabel="Tumour size (thousands of cancer cells)", title="Tumour growth")
     axes[1].set(xlabel="Day after tumour implantation", ylabel="Total free IFN-γ (molecules)",
                 title="Free IFN-γ in the tissue")
     axes[0].legend(frameon=False, fontsize=9)
@@ -81,16 +87,20 @@ def fig_timecourse():
 
     # summary table for the text
     with open(os.path.join(OUT, "summary_day21.txt"), "w") as fh:
-        fh.write("condition  n_seeds  fold_change_day21 (mean +/- SD)  free_IFNG_day21 (mean)\n")
-        for cond, (days, fold, ifng, nseed) in data.items():
-            fh.write(f"{cond:11s} {nseed:3d}   {fold[:, -1].mean():.4f} +/- {fold[:, -1].std():.4f}"
-                     f"   {ifng[:, -1].mean():.4g}\n")
+        t_end = min(d[0][-1] for d in data.values())
+        tag = "day21" if t_end >= 20.999 else f"day{t_end:.2f}"
+        fh.write(f"NOTE: values below are at day {t_end:.2f} (last time reached by every run)\n")
+        fh.write(f"condition  n_seeds  fold_change_{tag} (mean +/- SD)  free_IFNG_{tag} (mean)\n")
+        for cond, (days, cancer, fold, ifng, nseed) in data.items():
+            fh.write(f"{cond:11s} {nseed:3d}   tumour={cancer[:, -1].mean():.0f}"
+                     f"   fold={fold[:, -1].mean():.4f} +/- {fold[:, -1].std():.4f}"
+                     f"   free_IFNG={ifng[:, -1].mean():.4g}\n")
         if "male" in data and "female" in data:
-            r = data["male"][1][:, -1].mean() / data["female"][1][:, -1].mean()
-            fh.write(f"\nmale/female fold-change ratio at day 21: {r:.4f}\n")
+            r = data["male"][2][:, -1].mean() / data["female"][2][:, -1].mean()
+            fh.write(f"\nmale/female fold-change ratio at day {t_end:.2f}: {r:.4f}\n")
         if "male_noseq" in data and "female" in data:
-            r = data["male_noseq"][1][:, -1].mean() / data["female"][1][:, -1].mean()
-            fh.write(f"male(no internalization)/female ratio at day 21: {r:.4f}\n")
+            r = data["male_noseq"][2][:, -1].mean() / data["female"][2][:, -1].mean()
+            fh.write(f"male(no internalization)/female ratio at day {t_end:.2f}: {r:.4f}\n")
     print(open(os.path.join(OUT, "summary_day21.txt")).read())
 
 
@@ -211,7 +221,7 @@ def fig_diffusion():
     ax = axes[1]
     ax.plot(tb / 3600, xb / 1e6, "o", ms=3, color="#5b3c9e", label="simulation")
     tt = np.linspace(tb.min(), tb.max(), 50)
-    ax.plot(tt / 3600, (sb * tt + ib) / 1e6, "-", color="#222", lw=1.5, label="linear fit")
+    ax.plot(tt / 3600, (sb * tt + ib) / 1e6, "-", color="#222222", lw=1.5, label="linear fit")
     ax.set(xlabel="Time (h)", ylabel="Front position² (mm²)", title="IFN-γ front (1% of maximum)")
     ax.text(0.03, 0.97,
             f"log–log slope = {llb:.2f}  (1 = diffusive)\n"
