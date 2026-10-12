@@ -1,0 +1,7 @@
+ca_out/
+ca_check/
+raw/
+*.pyc
+__pycache__/
+*.png
+*.csv
