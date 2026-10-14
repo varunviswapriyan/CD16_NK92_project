@@ -65,6 +65,37 @@ if [ "$CMD" = status ] || [ "$CMD" = report ]; then
   exit 0
 fi
 
+# ------------------------------------------------------------------ band plots
+# NOTE the subcommand is "band orig", with a space. "band_orig" is not a command
+# and "org" is not a variant -- both just print the usage text.
+if [ "$CMD" = band ]; then
+  [ -d "$DST" ] || { bad "$DST does not exist"; exit 1; }
+  for v in "${@:2}"; do
+    ( cd "$DST" && "$PY" "$BOOT" band "$v" ) && \
+      ok "http://\$(hostname -I | awk '{print \$1}'):8000/Ca_fit_exp2/out_boot_ca2/band_$v.png"
+  done
+  [ $# -gt 1 ] || ( cd "$DST" && "$PY" "$BOOT" band orig )
+  exit 0
+fi
+
+# -------------------------------------------------------------------- variants
+# 'orig' leaves BOTH the Hill threshold k3 and the linear coefficient k4 free.
+# The script's own header says that combination makes a flat valley: k3, k4 and
+# C1 trade off, so C1 can roam orders of magnitude at nearly constant SSR. That
+# is what the Exp 2 CIs show. These three close the valley different ways:
+#   orig1  her model, S=1, k4 pinned to 1  (C1 carries the linear gain)
+#   lin1   linear drive only, k4=1, S free
+#   min4   both terms, k3 and S pinned at the n01 values
+if [ "$CMD" = variants ]; then
+  [ -d "$DST" ] || { bad "$DST does not exist -- run 'bash fit_exp2.sh' first"; exit 1; }
+  V="${VARIANTS:-orig1 lin1 min4}"
+  N="${NSAMP2:-20}"
+  say "submitting $(echo $V | wc -w) variants x $((N + 1)) samples on Exp 2"
+  echo "   variants: $V"
+  ( cd "$DST" && CA_WARM_FROM=exp1seed CA_STARTS=4 "$PY" "$BOOT" submit "$N" $V )
+  exit $?
+fi
+
 # ----------------------------------------------------------------------- setup
 say "setting up $DST"
 
