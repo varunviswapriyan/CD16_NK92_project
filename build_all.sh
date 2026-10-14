@@ -19,12 +19,18 @@ if [ ! -d ~/spparks_official ]; then
     echo "!! could not clone SPPARKS"; exit 1; }
 fi
 
-# 2. copy ONLY the stock core files Giuseppe left out (never overwrites his files)
+# 1b. check out SPPARKS at Giuseppe's era so the stock files match his 2024 base
+echo "== matching SPPARKS to mid-2024"
+( cd ~/spparks_official && git checkout -q "$(git rev-list -1 --before=2024-07-26 HEAD)" ) \
+  || echo "!! could not set the 2024 version -- continuing with current"
+
+# 2. copy the stock infrastructure files (overwrite, so version-matched ones win)
 echo "== filling missing core files"
-for b in comm_lattice comm_off_lattice random_park random_mars potential irregular; do
-  cp -n ~/spparks_official/src/$b.cpp . 2>/dev/null
-  cp -n ~/spparks_official/src/$b.h  . 2>/dev/null
+for b in comm_lattice comm_off_lattice random_park random_mars potential pair irregular; do
+  cp ~/spparks_official/src/$b.cpp . 2>/dev/null
+  cp ~/spparks_official/src/$b.h  . 2>/dev/null
 done
+cp ~/spparks_official/src/version.h . 2>/dev/null
 
 # 3. regenerate style headers so they list only styles whose files are present
 echo "== regenerating style_*.h"
