@@ -26,7 +26,7 @@ echo "== matching SPPARKS to mid-2024"
 
 # 2. copy the stock infrastructure files (overwrite, so version-matched ones win)
 echo "== filling missing core files"
-for b in comm_lattice comm_off_lattice random_park random_mars potential pair irregular; do
+for b in comm_lattice comm_off_lattice random_park random_mars potential pair pair_lj_cut irregular; do
   cp ~/spparks_official/src/$b.cpp . 2>/dev/null
   cp ~/spparks_official/src/$b.h  . 2>/dev/null
 done
@@ -39,8 +39,7 @@ mk style_app.h     AppStyle     'app_*.h'
 mk style_command.h CommandStyle '*.h'
 mk style_diag.h    DiagStyle    'diag_*.h'
 mk style_dump.h    DumpStyle    'dump_*.h'
-# pair: seed with the base pair.h so potential.cpp sees the full Pair class
-{ echo '#include "pair.h"'; grep -l 'PairStyle(' pair_*.h 2>/dev/null | sort | sed 's|^|#include "|; s|$|"|'; } > style_pair.h
+mk style_pair.h    PairStyle    'pair_*.h'
 mk style_region.h  RegionStyle  'region_*.h'
 mk style_solve.h   SolveStyle   'solve_*.h'
 
