@@ -39,7 +39,8 @@ mk style_app.h     AppStyle     'app_*.h'
 mk style_command.h CommandStyle '*.h'
 mk style_diag.h    DiagStyle    'diag_*.h'
 mk style_dump.h    DumpStyle    'dump_*.h'
-mk style_pair.h    PairStyle    'pair_*.h'
+# pair: seed with the base pair.h so potential.cpp sees the full Pair class
+{ echo '#include "pair.h"'; grep -l 'PairStyle(' pair_*.h 2>/dev/null | sort | sed 's|^|#include "|; s|$|"|'; } > style_pair.h
 mk style_region.h  RegionStyle  'region_*.h'
 mk style_solve.h   SolveStyle   'solve_*.h'
 
