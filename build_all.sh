@@ -51,4 +51,15 @@ if mpicxx -O3 -std=c++14 -w -fpermissive *.cpp -o spk_sexbias; then
   echo "== BUILD_OK"; ls -l spk_sexbias
 else
   echo "== BUILD FAILED -- if it's a 'No such file: X.h', add X to the loop in step 2 and rerun"
+  exit 1
 fi
+
+# 5. smoke test: 20-step male run, to confirm it runs and show the stats format
+echo "== smoke test (male, 20 steps)"
+mkdir -p smoke && cd smoke
+cp -r ../rsc_out_2026-07-03/sex_bias_initialization_files . 2>/dev/null
+sed -e 's|read_sites.*|read_sites sex_bias_initialization_files/d14_M_4_SPPARKS_init|' \
+    -e 's|^run .*|run 20|' ../rsc_out_2026-07-03/in.full > in.simulation
+mpirun -np 1 ../spk_sexbias < in.simulation > log.spparks 2>&1
+echo "---- end of smoke log (send me this) ----"
+tail -40 log.spparks
