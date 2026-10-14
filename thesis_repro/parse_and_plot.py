@@ -50,10 +50,12 @@ def parse_log(path, cancer_col):
     tcol = 0
     # choose cancer column
     if cancer_col is None:
-        if "i1" in header:
-            ccol = header.index("i1")
-        else:
-            ccol = 1            # first column after Time
+        ccol = None
+        for cand in ("sum(i1)", "i1"):     # SPPARKS labels the cancer column sum(i1)
+            if cand in header:
+                ccol = header.index(cand); break
+        if ccol is None:
+            ccol = 6            # Time Naccept Nreject Nsweeps CPU Propnsty <cancer>...
     elif cancer_col.isdigit():
         ccol = int(cancer_col)
     else:
