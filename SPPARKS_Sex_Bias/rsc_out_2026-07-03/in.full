@@ -1,0 +1,135 @@
+# SPPARKS Sex bias model
+
+seed		 8377
+
+# narg != 33
+# 100 lattice width, 100 lattice height, 3 max pixel occupancy, 2 cancer occupancy, 1 Tp occupancy, 1 Tm occupancy, 1 Te occupancy, do carrying capacity? 0 for no 1 for yes
+# 1000 tcell carrying capacity, 10/54 ifng diffusion rate, 0.03 (20s) one ifng time step, 0.166 ifng production (s-1), 0.14 ifng decay (s-1), 0.5 IFNGR decay rate
+# 1 whether to use ifng limitation of cancer, 1 whether to use ifng augmentation of t cell cytotoxicity, 1.0 ifng conc to get half min cancer prolif
+# 1.0 ifng conc to get half max cytotoxicity, 0 do ifng periodic bc, 0.03 diffusion rate reduction of adhering T cells, 2.0 ifng half max feedback threshold
+# 0 whether or not to update all sites at every event, 1.4 AR+ T cell ifng uptake, 0.75 factor to modulate IFNG concentration which affects cancer prolif and cd8 cytotoxicity
+# 0 whether or not to use mean IFNG concentration rather than local, 4 hill function degree for IFNG effects, 4 ifng feedback hill function degree, ifng feedback increase ratio
+# AR- CD8 receptors, AR+ CD8 receptors, cancer receptors, use simple decay model rather than binding model, minimum fraction of cancer prolif, ifng binding rate, ifng unbinding rate,
+# ifng for half max T motility
+# app_style    rxn/diff/custom 600 600 4 2 1 1 1 1 1000 20.0 0.015 0.1 0.0 0.0016667 1 1 0.6 0.6 0 0.03 0.2 0 14 1.0 0 4 4 2.0 1000 1000 1000 0 0.25 1 100 0.5
+# app_style    rxn/diff/custom 100 100 4 2 1 1 1 1 1000 20.0 0.015 0.1 0.0 0.0016667 1 1 0.25 0.2 0 0.03 0.2 0 14 1.0 0 4 4 2.0 1000 1000 1000 0 0.25 1 100 0.5
+app_style    rxn/diff/custom 600 600 4 2 1 1 1 1 10000 20.0 0.015 0.1 0.0 0.0016667 1 1 0.6 0.6 0 0.03 0.2 0 14 1.0 0 4 4 2.0 1000 1000 1000 0 0.25 1 100 0.5 # take 0.015->0.01875, to go from 9s to 11.25s
+
+# app_style    rxn/diff/custom 100 100 4 2 1 1 1 1 1000 10.0 0.03 0.1 0.0 0.003333 1 1 0.5 0.5 0 0.03 0.5 0 14 1.0 0 4 4 2.0 1000 1000 4000 0 0.5 1 100 0.5
+
+dimension	 2
+lattice		 sq/4n 1.0 # number of neighbors
+boundary	 p p p
+
+region		 box block 0 600 0 600 0 1 # 0 20 0 20 -1 1 # Size of Lattice x, y, z
+create_box	 box
+create_sites	 box
+
+# Each discrete number is a separate voxel, bounds are inclusive. 0 0 0 0 refers to one voxel. What about z?
+
+read_sites       sex_bias_initialization_files/d14_F_4_SPPARKS_init # single_cell_ifng_initializationSPPARKS_init # d7_M_1_SPPARKS_init
+
+sector		no
+solve_style     tree
+
+add_species A # 0 Cancer cells
+add_species	B # 1 Progenitor CD8+ T Cells
+add_species	C # 2 Mature CD8+ T Cells
+add_species	D # 3 Exhausted CD8+ T Cells
+add_species	E # 4 GONE, was a proliferating progenitor CD8
+add_species	F # 5 AR+ Progenitor exhausted CD8+ T Cells
+add_species	G # 6 AR+ Exhausted CD8+ T Cells
+add_species	I # 7 Recruiting
+add_species	J # 8 code output signal
+add_species	K # 9 Dead cells
+add_species	L # 10 Lattice edge
+add_species M # 11 IFNG diffusable region
+add_species O # 12 Helper CD4+ T cells
+add_species P # 13 AR+ Helper CD4+ T cells
+add_species Q # 14 Tregs
+add_species R # 15 AR+ Tregs
+add_species S # 16 macrophages
+add_species T # 17 AR+ macrophages
+add_species	H # 0 IFNG/Cytokine record # needs to be last or SPPARKS confuses itself
+add_species N # 1 Bound IFNG fraction record
+
+add_rxn     0 local A nbr 0.0009652 local A nbr             # Cancer proliferation, rag2ko growth rate
+add_rxn     1 local B nbr 0.00463 local B B nbr             # Tp proliferation (0.01 in ICS, 0.00347 24-08-20)
+add_rxn     2 local C nbr 0 local C C nbr                   # Tm proliferation
+add_rxn     3 local D nbr 0 local D D nbr                   # Te proliferation
+add_rxn     4 local E nbr 0.0 local E E nbr                 # GONE AR+ Tp proliferation
+add_rxn     5 local F nbr 0 local F F nbr                   # AR+ Tm proliferation
+add_rxn     6 local G nbr 0.00 local G G nbr                # AR+ Te proliferation
+
+add_rxn     7 local I nbr 6.87204 local I nbr                # Tp recruitment, f- 0.2121
+add_rxn     8 local I nbr 6.87204 local I nbr                # Tm recruitment
+add_rxn     9 local I nbr 0 local I nbr                     # Te recruitment
+add_rxn     10 local I nbr 0.0 local I nbr                  # GONE AR+ Tp recruitment
+add_rxn     11 local I nbr 1.52712 local I nbr               # AR+ Tm recruitment
+add_rxn     12 local I nbr 0 local I nbr                    # AR+ Te recruitment
+
+add_rxn	    13 local B nbr 0.2375 local nbr B               # Tp motility
+add_rxn	    14 local C nbr 0.2375 local nbr C               # Tm motility
+add_rxn	    15 local D nbr 0.2375 local nbr D               # Te motility
+add_rxn	    16 local E nbr 0.0 local nbr E                  # GONE AR+ Tp motility
+add_rxn	    17 local F nbr 0.2375 local nbr F               # AR+ Tm motility
+add_rxn	    18 local G nbr 0.2375 local nbr G               # AR+ Te motility
+
+add_rxn     19 local B nbr 0.00347 local C nbr              # Tp differentiation to Tm, 1/d (0.00694 24-08-27)
+add_rxn     20 local E nbr 0.0 local F nbr                  # GONE AR+ Tp differentiation to AR+ Tm, 1/d
+
+add_rxn     21 local A C nbr 0.0106 local A D nbr           # Tm cancer exhaustion local 1/16hr
+add_rxn     22 local A nbr C 0.0106 local A nbr D           # Tm cancer exhaustion nbr
+add_rxn     23 local A F nbr 0.0106 local A G nbr           # AR+ Tm cancer exhaustion local, this is the AR+PE
+add_rxn     24 local A nbr F 0.0106 local A nbr G           # AR+ Tm cancer exhaustion nbr
+
+add_rxn	    25 local D nbr 0.00694 local nbr                # Te death, 1/d
+add_rxn	    26 local G nbr 0.00694 local nbr                # AR+ Te death, 1/d
+
+add_rxn	    27 local C A nbr 0.06 local C nbr               # Cancer lysis by Tm local
+add_rxn	    28 local C nbr A 0.06 local C nbr               # Cancer lysis by Tm nbr
+add_rxn	    29 local D A nbr 0 local D nbr                  # Cancer lysis by Te local
+add_rxn     30 local D nbr A 0 local D nbr                  # Cancer lysis by Te nbr
+add_rxn	    31 local F A nbr 0.06 local F nbr               # Cancer lysis by AR+ Tm local
+add_rxn	    32 local F nbr A 0.06 local F nbr               # Cancer lysis by AR+ Tm nbr
+add_rxn	    33 local G A nbr 0 local G nbr                  # Cancer lysis by AR+ Te local
+add_rxn     34 local G nbr A 0 local G nbr                  # Cancer lysis by AR+ Te nbr
+
+add_rxn     35 local B nbr 0 local nbr                      # Tp death or outflow, 1/d
+add_rxn     36 local C nbr 0 local nbr                      # Tm death, 1/d
+add_rxn     37 local E nbr 0 local nbr                      # GONE AR+ Tp death, 1/d
+add_rxn     38 local F nbr 0 local nbr                      # AR+ Tm death, 1/d
+
+add_rxn	    39 local O nbr 0.2375 local nbr O               # Th motility
+add_rxn	    40 local P nbr 0.2375 local nbr P               # AR+ Th motility
+add_rxn	    41 local Q nbr 0.2375 local nbr Q               # Treg motility
+add_rxn	    42 local R nbr 0.2375 local nbr R               # Treg motility
+
+add_rxn     43 local O B nbr 0.0 local O C nbr              # Th local differentiation of Tp to Tm
+add_rxn     44 local O E nbr 0.0 local O F nbr              # GONE Th local differentiation of AR+ Tp to AR+ Tm
+add_rxn     45 local O nbr B 0.0 local O nbr C              # Th nbr differentiation of Tp to Tm
+add_rxn     46 local O nbr E 0.0 local O nbr F              # GONE Th nbr differentiation of AR+ Tp to AR+ Tm
+
+add_rxn     47 local P B nbr 0.0 local P C nbr              # AR+ Th local differentiation of Tp to Tm
+add_rxn     48 local P E nbr 0.0 local P F nbr              # GONE AR+ Th local differentiation of AR+ Tp to AR+ Tm
+add_rxn     49 local P nbr B 0.0 local P nbr C              # AR+ Th nbr differentiation of Tp to Tm
+add_rxn     50 local P nbr E 0.0 local P nbr F              # GONE AR+ Th nbr differentiation of AR+ Tp to AR+ Tm
+
+add_rxn     51 local Q C nbr 0.0106 local Q D nbr           # Tm Treg exhaustion local
+add_rxn     52 local Q nbr C 0.0106 local Q nbr D           # Tm Treg exhaustion nbr
+add_rxn     53 local Q F nbr 0.0106 local Q G nbr           # AR+ Tm Treg exhaustion local
+add_rxn     54 local Q nbr F 0.0106 local Q nbr G           # AR+ Tm Treg exhaustion nbr
+
+add_rxn     55 local R C nbr 0.0106 local R D nbr           # Tm AR+ Treg exhaustion local
+add_rxn     56 local R nbr C 0.0106 local R nbr D           # Tm AR+ Treg exhaustion nbr
+add_rxn     57 local R F nbr 0.0106 local R G nbr           # AR+ Tm AR+ Treg exhaustion local
+add_rxn     58 local R nbr F 0.0106 local R nbr G           # AR+ Tm AR+ Treg exhaustion nbr
+
+add_rxn     59 local B nbr 0.00347 local F nbr              # Tp differentiation to AR+ Tm, 1/d (0.00694 24-08-27)
+
+diag_style propensity
+diag_style array i1 sum i2 sum i3 sum i4 sum i5 sum i6 sum i7 sum i8 sum d1 sum i9 sum i10 sum i11 sum i12 sum d2 sum i13 sum i14 sum
+
+stats           1.0
+#dump            1 sites 1.0 dump.2D_model.* id i1 i2 i3 i4 i5 i6 i7 i8 d1 i9 i10 i11 i12 d2 i13 i14
+run             1008 # 450 - 3.1 days, 1008 - 1 week (between time steps in data), 2016 for 2 weeks

@@ -1,0 +1,30 @@
+
+
+app_style    rxn/diff/custom 600 600 4 2 1 1 1 1 10000
+
+600 lattice width,
+600 lattice height,
+4 max pixel occupancy
+2 cancer occupancy
+1 Tp occupancy
+1 Tm occupancy
+1 Te occupancy
+do carrying capacity? 0 for no 1 for yes
+10000 tcell carrying capacity
+
+10.0 0.03 0.166 0.14 0.5 1 1 1.0 1.0 0 0.03 1.0 0 2.8
+
+10 (54) ifng diffusion rate
+0.03 (20s) one ifng time step
+0.166 ifng production (s-1)
+0.14 ifng uptake (s-1)
+0.5 ifng saturation threshold
+1 whether to use ifng limitation of cancer
+1 whether to use ifng augmentation of t cell cytotoxicity
+15 max ifng conc to get minimum cancer prolif
+15 max ifng conc to get max cytotoxicity
+1 do ifng periodic bc
+0.03 diffusion rate reduction of adhering T cells
+1.0 ifng feedback threshold
+0 whether or not to update all sites at every event
+0.56 T cell ifng uptake
