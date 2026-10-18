@@ -115,7 +115,14 @@ def main():
 
     axes[0].set(xlabel="Day", ylabel="Tumour size (thousands of cancer cells)",
                 title="Absolute tumour size")
-    axes[1].set(xlabel="Day", ylabel="Fold change", title="Cancer fold change")
+    axes[1].set(xlabel="Day", ylabel="Cancer cell population fold change",
+                title="Cancer fold change (log axis, like the paper)")
+    # match the paper: fold change on a LOG y-axis
+    from matplotlib.ticker import FixedLocator, FuncFormatter
+    axes[1].set_yscale("log")
+    axes[1].yaxis.set_major_locator(FixedLocator([1.0,1.2,1.4,1.6,1.8,2.0,2.2,2.4]))
+    axes[1].yaxis.set_minor_locator(FixedLocator([]))
+    axes[1].yaxis.set_major_formatter(FuncFormatter(lambda y,_: f"{y:.1f}"))
     for ax in axes:
         ax.legend(frameon=False); ax.grid(alpha=.3)
     fig.tight_layout()
