@@ -20,32 +20,42 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 L = 600
-TIMES = [(0, "Day 14"), (504, "Day 17.5"), (1008, "Day 21")]
+# SPPARKS names the dumps by index: .0 = day 14, .1 = day 17.5, .2 = day 21
+TIMES = [(0, "Day 14"), (1, "Day 17.5"), (2, "Day 21")]
 CONDS = ["male", "female"]
 
 
 def read_dump(path):
-    """Return dict of columns -> 1D arrays, parsed from one SPPARKS text dump."""
-    with open(path) as f:
-        lines = f.readlines()
+    """Parse a SPPARKS native 'dump sites' file:
+       ... header ...
+       id x y i1 i2 i3 i4 i5 i6 i7 d1 values
+       ... box bounds ...
+       Values
+       <blank>
+       <id x y i1 ... d1>   one row per site
+    """
     cols = None
     data = []
-    i = 0
-    while i < len(lines):
-        ln = lines[i]
-        if ln.startswith("ITEM: ATOMS") or ln.startswith("ITEM: SITES"):
-            cols = ln.split()[2:]
-            i += 1
-            while i < len(lines) and not lines[i].startswith("ITEM:"):
-                p = lines[i].split()
-                if p:
-                    data.append(p)
-                i += 1
-            break
-        i += 1
+    in_values = False
+    with open(path) as f:
+        for line in f:
+            s = line.split()
+            if not s:
+                continue
+            if s[0] == "Values":
+                in_values = True
+                continue
+            if cols is None and s[0] == "id":
+                cols = [c for c in s if c != "values"]
+                continue
+            if in_values and cols is not None and len(s) >= len(cols):
+                try:
+                    data.append([float(x) for x in s[:len(cols)]])
+                except ValueError:
+                    pass
     if cols is None or not data:
         return None
-    arr = np.array(data, dtype=float)
+    arr = np.array(data)
     return {c: arr[:, k] for k, c in enumerate(cols)}
 
 
