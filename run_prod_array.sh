@@ -21,6 +21,13 @@ for cond in male female male_noseq; do
   base=runs_big/prod/$cond
   mkdir -p "$base"
   cp -f "$SRC/sex_bias_initialization_files/$slide" "$base/$slide"
+
+  # build the sed program as ONE semicolon-joined script (no quote-stripping trap);
+  # \$seed stays literal so it expands inside the job at runtime.
+  SEDPROG="/^seed/ s/[0-9][0-9]*/\$seed/ ; s|read_sites.*|read_sites sex_bias_initialization_files/$slide|"
+  NOSEQ=""
+  [ "$noseq" = 1 ] && NOSEQ=" ; /^app_style/ s/0.0016667/0/"
+
   cat > "$base/array.sh" <<EOF
 #!/usr/bin/env bash
 #SBATCH --job-name=${cond}
@@ -34,10 +41,7 @@ seed=\$((9000 + SLURM_ARRAY_TASK_ID))
 d=$base/s\$seed
 mkdir -p "\$d/sex_bias_initialization_files"
 cp -f "$PWD/$base/$slide" "\$d/sex_bias_initialization_files/"
-sed -e "/^seed/ s/[0-9][0-9]*/\$seed/" \\
-    -e "s|read_sites.*|read_sites sex_bias_initialization_files/$slide|" \\
-    ${noseq:+-e "/^app_style/ s/0.0016667/0/"} \\
-    "$PWD/$SRC/in.full" > "\$d/in.simulation"
+sed "${SEDPROG}${NOSEQ}" "$PWD/$SRC/in.full" > "\$d/in.simulation"
 if [ "$fem" = 1 ]; then
   awk '{ if (\$0 ~ /recruitment/ && \$0 !~ /app_style/){ if(\$0 ~ /AR\\+/)\$6=0; else if(\$0 ~ /Tp recruitment/||\$0 ~ /Tm recruitment/)\$6=\$6/0.63 }
          if (\$0 ~ /Tp differentiation/ && \$0 !~ /app_style/){ if(\$0 ~ /AR\\+ Tm/)\$6=0; else \$6=\$6*2 } print }' \\
