@@ -29,18 +29,21 @@ echo "=============== FOLD-CHANGE RESULTS ==============="
 python3 - <<'PY'
 import glob, math
 def fold(f):
-    col=first=last=None
+    # returns fold only if the run REACHED day 21 (Time >= 1000); else None
+    col=first=last=lasttime=None
     for line in open(f):
         s=line.split()
         if not s: continue
         if "sum(i1)" in s: col=s.index("sum(i1)"); continue
         if col is not None and len(s)>col:
             try:
-                float(s[0]); v=float(s[col])
+                t=float(s[0]); v=float(s[col])
                 if first is None: first=v
-                last=v
+                last=v; lasttime=t
             except ValueError: pass
-    return last/first if first and last else None
+    if first and last and lasttime is not None and lasttime>=1000:
+        return last/first
+    return None
 groups={
  "no-seq (IFNGR blocking)": ["runs_big/noseq/male_noseq","runs_big/noseq/female_noseq"],
  "CD4 removed":             ["runs_big/cd4off/male_nocd4","runs_big/cd4off/female_nocd4"],
