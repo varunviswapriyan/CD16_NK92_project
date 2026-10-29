@@ -56,5 +56,7 @@ else:
     fig.suptitle("IFN-γ spread into the tumour — effective diffusion", fontsize=12)
 
 fig.tight_layout()
-fig.savefig("Fig_effective_diffusion.png", dpi=200)
-print("wrote Fig_effective_diffusion.png")
+import os
+os.makedirs("figures", exist_ok=True)
+fig.savefig("figures/Figure5.png", dpi=200)
+print("wrote figures/Figure5.png")
