@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-plot_diffusion.py FRONT.csv
-Effective-diffusion figure. The bare-diffusion front races out and SATURATES
-against the box edge, so a straight line through the whole bare curve is wrong
-(that was the "weird" fit). Here each run is fit ONLY over its linear diffusive
-regime (front^2 between 5% and 55% of its own max), shown as two clean panels.
-D_eff = D_bare * slope_bound / slope_bare.
+plot_diffusion.py FRONT.csv  ->  figures/Figure5.png
+Single-panel MSD figure (matches Giuseppe thesis Fig 4.8): the IFN-g front's
+squared position vs time for the with-receptor run. A straight line
+(front^2 proportional to t) is the signature of diffusion; its slope gives the
+effective diffusion constant D_eff. The receptor-free run is read only to
+calibrate slope -> D (not plotted); D_eff is printed for the caption.
 front.csv columns: run,time_h,front_um,front_um2   (run = 'bound' or 'bare')
 """
-import sys, csv
+import sys, csv, os
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -23,40 +23,27 @@ with open(path) as f:
         rows.setdefault(r["run"], []).append((float(r["time_h"]), float(r["front_um2"])))
 
 def linfit(t, x2):
-    """fit the linear diffusive regime: 5%..55% of the run's own max front^2."""
-    mx = x2.max()
-    m = (x2 > 0.05*mx) & (x2 < 0.55*mx)
-    if m.sum() < 3:
-        m = np.ones_like(x2, bool)
-    sl, ic = np.polyfit(t[m], x2[m], 1)
-    return sl, ic, m
+    mx = x2.max(); m = (x2 > 0.05*mx) & (x2 < 0.55*mx)
+    if m.sum() < 3: m = np.ones_like(x2, bool)
+    sl, ic = np.polyfit(t[m], x2[m], 1); return sl, ic
 
-fig, (a1, a2) = plt.subplots(1, 2, figsize=(11, 4.6))
-res = {}
-for run, ax, col in (("bound", a1, "#b81f5b"), ("bare", a2, "#1f4db8")):
-    if run not in rows:
-        ax.text(.5,.5,f"no '{run}' data",ha="center",va="center",transform=ax.transAxes); continue
-    pts = np.array(sorted(rows[run])); t, x2 = pts[:,0], pts[:,1]
-    sl, ic, m = linfit(t, x2); res[run] = sl
-    ax.plot(t, x2, "o", ms=3, color=col, alpha=.45, label="data")
-    ax.plot(t[m], sl*t[m]+ic, "-", color="k", lw=1.8, label="linear-regime fit")
-    ax.set(xlabel="Time (hours)", ylabel=r"Front position$^2$ ($\mu m^2$)")
-    ax.legend(frameon=False, fontsize=9); ax.grid(True, color="#e6e6e6", lw=.6)
+b = np.array(sorted(rows["bound"])); bt, bx = b[:, 0], b[:, 1]
+bsl, bic = linfit(bt, bx)
+d_eff = None
+if "bare" in rows:
+    r = np.array(sorted(rows["bare"])); rsl, _ = linfit(r[:, 0], r[:, 1])
+    if rsl: d_eff = D_BARE * bsl / rsl
 
-a1.set_title("Bound (IFN-γ binds receptors)")
-a2.set_title("Bare diffusion (D = 20, calibration)")
-
-if "bound" in res and "bare" in res and res["bare"]:
-    d_eff = D_BARE * res["bound"] / res["bare"]
-    fig.suptitle(f"IFN-γ spread into the tumour — effective diffusion "
-                 f"D_eff ≈ {d_eff:.2f} µm²/s   (bare D = 20 µm²/s; reduced {res['bare']/res['bound']:.0f}×)",
-                 fontsize=12)
-    print(f"slope_bound={res['bound']:.4g}  slope_bare={res['bare']:.4g}  D_eff={d_eff:.3f}")
-else:
-    fig.suptitle("IFN-γ spread into the tumour — effective diffusion", fontsize=12)
-
+fig, ax = plt.subplots(figsize=(6.2, 5))
+ax.plot(bt, bx, "o", ms=3, color="#b81f5b", alpha=.5, label="simulation")
+ax.plot(bt, bsl*bt + bic, "-", color="k", lw=2, label="linear fit")
+ax.set_xlabel("Time (hours)")
+ax.set_ylabel(r"Front position$^2$, $x^2$ ($\mu m^2$)")
+ax.set_title("IFN-γ spread into the tumour")
+ax.legend(frameon=False); ax.grid(True, color="#e6e6e6", lw=.6)
 fig.tight_layout()
-import os
 os.makedirs("figures", exist_ok=True)
 fig.savefig("figures/Figure5.png", dpi=200)
 print("wrote figures/Figure5.png")
+if d_eff is not None:
+    print(f"D_eff = {d_eff:.2f} um^2/s  (for the caption; bare D = {D_BARE:.0f})")
