@@ -22,7 +22,7 @@ def runs(d):
             if "sum(i1)" in s:
                 if t: break
                 hdr=s; k=s.index("sum(i1)"); continue
-            if hdr and len(s)>k:
+            if hdr and len(s)==len(hdr):
                 try: tv=float(s[0]); cv=float(s[k])
                 except ValueError: continue
                 if t and tv<=t[-1]: break

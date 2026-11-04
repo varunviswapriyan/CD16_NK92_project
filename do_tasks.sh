@@ -72,7 +72,7 @@ def group(dirglob, need_day21=True):
         if r is None: continue
         t=r.get("Time", list(r.values())[0])
         d=14+t/144.0
-        if need_day21 and d[-1]<20.9: continue
+        if need_day21 and t[-1]<1000: continue
         runs.append({k:np.interp(DAYS,d,v) for k,v in r.items()})
     return runs
 
@@ -95,17 +95,16 @@ if got: fig.savefig("figures/Growth_thesis_vs_ours.png",dpi=200); say("[task2] w
 # ---------------- task 1: kinetics ----------------------------------------
 CONDS=[("standard","runs_big/prod/male","runs_big/prod/female"),
        ("AR+ internalization off","runs_big/noseq/male_noseq","runs_big/noseq/female_noseq"),
-       ("OLD cd4off run = recruitment markers removed","runs_big/cd4off/male_nocd4","runs_big/cd4off/female_nocd4"),
        ("CD4 helpers removed (corrected)","runs_big/cd4off_v2/male","runs_big/cd4off_v2/female"),
        ("IFNGR blocked, all T cells","runs_big/blockall/male","runs_big/blockall/female")]
 PANELS=[("Cancer cells",["sum(i1)"]),
         ("AR- CD8",["sum(i2)","sum(i3)","sum(i4)"]),
         ("AR+ CD8",["sum(i5)","sum(i6)","sum(i7)"]),
         ("AR+ fraction of CD8",None),
-        ("CD4 helpers AR- (i13)",["sum(i13)"]),
-        ("CD4 helpers AR+ (i14)",["sum(i14)"]),
-        ("Dead cells (i10)",["sum(i10)"]),
-        ("Free IFN-γ (sum of d1)",["sum(d1)"])]
+        ("Total CD8",["sum(i2)","sum(i3)","sum(i4)","sum(i5)","sum(i6)","sum(i7)"]),
+        ("CD4 helpers AR-",["sum(i13)"]),
+        ("CD4 helpers AR+",["sum(i14)"]),
+        ("Free IFN-γ",["sum(d1)"])]
 def series(r,cols):
     if cols is None:
         a=sum(r[c] for c in ("sum(i5)","sum(i6)","sum(i7)"))
@@ -149,7 +148,9 @@ if free:
     for ax,sex in zip(axs,("male","female")):
         for (name,s),m in free.items():
             if s==sex: ax.plot(DAYS,m,lw=2,label=name)
-        ax.set_title(f"Free IFN-γ — {sex}"); ax.set_xlabel("Day"); ax.legend(frameon=False,fontsize=8)
+        ax.set_yscale("log"); ax.set_ylim(bottom=1e5)
+        ax.set_title(f"Free IFN-γ — {sex}"); ax.set_xlabel("Day"); ax.set_ylabel("total free IFN-γ (log)")
+        ax.legend(frameon=False,fontsize=8)
         ax.grid(True,color="#eee",lw=.6)
     fig.tight_layout(); fig.savefig("figures/Kinetics_free_IFNg_by_condition.png",dpi=150)
     say("[task1] wrote figures/Kinetics_free_IFNg_by_condition.png")
@@ -193,8 +194,8 @@ if any(v is not None for v in cache.values()):
             can=grid(d,"i1")
             ax.contour(uniform_filter((can>0).astype(float),31),levels=[0.5],colors="white",linewidths=1.0)
             ax.set_title(f"{sex} — {lab}",fontsize=11)
-    fig.suptitle("Free IFN-γ (white line = tumour edge)",fontsize=15)
-    if im is not None: fig.colorbar(im,ax=axs,shrink=.72,label="free IFN-γ (per site, stretched scale)")
+    fig.suptitle("Free IFN-γ and tumour edge (white line)",fontsize=15)
+    if im is not None: fig.colorbar(im,ax=axs,shrink=.72,label="free IFN-γ per site (nonlinear scale)")
     fig.savefig("figures/Figure3_overlay.png",dpi=150); say("[task3] wrote figures/Figure3_overlay.png")
 
     from matplotlib.patches import Patch
@@ -237,7 +238,7 @@ PY
 }
 
 if [ "${1:-}" = "plot" ]; then
-  rm -f figures/Kinetics_CD4_helpers_removed.png figures/Kinetics_standard_kin.png
+  rm -f figures/Kinetics_CD4_helpers_removed.png figures/Kinetics_standard_kin.png figures/Kinetics_OLD_cd4off_run_=_recruitment_markers_removed.png
   echo "=== queue ==="; squeue -u "$USER" -h -o "%j" 2>/dev/null | sort | uniq -c
   echo "=== plots (log appended to $REPORT) ==="
   { echo; echo "######## plot pass $(date)"; } >> $REPORT
