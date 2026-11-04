@@ -57,7 +57,7 @@ def read_log(f):
         if "sum(i1)" in s:
             if rows: break
             hdr=s; continue
-        if hdr and len(s)>=len(hdr):
+        if hdr and len(s)==len(hdr):
             try: v=[float(x) for x in s[:len(hdr)]]
             except ValueError: continue
             if rows and v[0]<=rows[-1][0]: break
@@ -191,7 +191,7 @@ if any(v is not None for v in cache.values()):
             if d is None: continue
             im=ax.imshow(grid(d,"d1"),origin="lower",cmap="magma",norm=PowerNorm(0.35,vmin=0,vmax=vmax))
             can=grid(d,"i1")
-            ax.contour(uniform_filter(can,9),levels=[0.3],colors="white",linewidths=1.0)
+            ax.contour(uniform_filter((can>0).astype(float),31),levels=[0.5],colors="white",linewidths=1.0)
             ax.set_title(f"{sex} — {lab}",fontsize=11)
     fig.suptitle("Free IFN-γ (white line = tumour edge)",fontsize=15)
     if im is not None: fig.colorbar(im,ax=axs,shrink=.72,label="free IFN-γ (per site, stretched scale)")
@@ -207,12 +207,12 @@ if any(v is not None for v in cache.values()):
             ix=np.clip(d["x"].astype(int),0,L-1); iy=np.clip(d["y"].astype(int),0,L-1)
             arm=d["i2"]+d["i3"]+d["i4"]; arp=d["i5"]+d["i6"]+d["i7"]
             ax.imshow(grid(d,"i1"),origin="lower",cmap="Reds",vmin=0,vmax=2,alpha=.7)
-            m=arp>0; ax.scatter(ix[m],iy[m],s=2.0,c="#00b000",linewidths=0,alpha=.9)
             m=arm>0; ax.scatter(ix[m],iy[m],s=4.0,c="#1565ff",linewidths=0,alpha=.7)
+            m=arp>0; ax.scatter(ix[m],iy[m],s=4.0,c="#00b000",linewidths=0,alpha=.95)
             ax.set_title(f"{sex} — {lab}  (AR+ {int(arp.sum())}, AR- {int(arm.sum())})",fontsize=10)
     h=[Patch(facecolor="#c0392b",label="cancer"),
        Line2D([0],[0],marker='o',color='none',markerfacecolor="#1565ff",markersize=7,label="AR- CD8"),
-       Line2D([0],[0],marker='o',color='none',markerfacecolor="#00b000",markersize=5,label="AR+ CD8")]
+       Line2D([0],[0],marker='o',color='none',markerfacecolor="#00b000",markersize=7,label="AR+ CD8")]
     fig.suptitle("Spatial cell positions",fontsize=16,y=.99)
     fig.legend(handles=h,loc="upper center",ncol=3,frameon=False,fontsize=12,bbox_to_anchor=(.5,.955))
     fig.tight_layout(rect=[0,0,1,.92]); fig.savefig("figures/Figure2_cells.png",dpi=150)
@@ -237,6 +237,7 @@ PY
 }
 
 if [ "${1:-}" = "plot" ]; then
+  rm -f figures/Kinetics_CD4_helpers_removed.png figures/Kinetics_standard_kin.png
   echo "=== queue ==="; squeue -u "$USER" -h -o "%j" 2>/dev/null | sort | uniq -c
   echo "=== plots (log appended to $REPORT) ==="
   { echo; echo "######## plot pass $(date)"; } >> $REPORT
