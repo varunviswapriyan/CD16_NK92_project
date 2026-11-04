@@ -7,7 +7,7 @@
 #
 # Tasks covered
 #   0  report: log columns + boundary-condition evidence (deck + SPPARKS source)
-#   1  population kinetics (cancer, AR-/AR+ CD8, CD4 helpers, Tregs, free IFN-g)
+#   1  population kinetics (cancer, AR-/AR+ CD8, CD4 helpers, free IFN-g)
 #      for all conditions  -> figures/Kinetics_*.png + table in tasks_report.txt
 #   2  growth curves: Giuseppe's original (thesis) params vs ours, LINEAR x and y
 #                         -> figures/Growth_thesis_vs_ours.png
@@ -94,19 +94,17 @@ if got: fig.savefig("figures/Growth_thesis_vs_ours.png",dpi=200); say("[task2] w
 
 # ---------------- task 1: kinetics ----------------------------------------
 CONDS=[("standard","runs_big/prod/male","runs_big/prod/female"),
-       ("standard (kin)","runs_big/kin/std_male","runs_big/kin/std_female"),
        ("AR+ internalization off","runs_big/noseq/male_noseq","runs_big/noseq/female_noseq"),
-       ("AR+ internalization off (kin)","runs_big/kin/noseq_male","runs_big/kin/noseq_female"),
-       ("CD4 helpers removed","runs_big/cd4off/male_nocd4","runs_big/cd4off/female_nocd4"),
-       ("CD4 helpers removed (kin)","runs_big/kin/cd4off_male","runs_big/kin/cd4off_female"),
+       ("OLD cd4off run = recruitment markers removed","runs_big/cd4off/male_nocd4","runs_big/cd4off/female_nocd4"),
+       ("CD4 helpers removed (corrected)","runs_big/cd4off_v2/male","runs_big/cd4off_v2/female"),
        ("IFNGR blocked, all T cells","runs_big/blockall/male","runs_big/blockall/female")]
 PANELS=[("Cancer cells",["sum(i1)"]),
         ("AR- CD8",["sum(i2)","sum(i3)","sum(i4)"]),
         ("AR+ CD8",["sum(i5)","sum(i6)","sum(i7)"]),
         ("AR+ fraction of CD8",None),
-        ("CD4 helpers AR- (Th)",["sum(i8)"]),
-        ("CD4 helpers AR+",["sum(i9)"]),
-        ("Tregs (AR- + AR+)",["sum(i10)","sum(i11)"]),
+        ("CD4 helpers AR- (i13)",["sum(i13)"]),
+        ("CD4 helpers AR+ (i14)",["sum(i14)"]),
+        ("Dead cells (i10)",["sum(i10)"]),
         ("Free IFN-γ (sum of d1)",["sum(d1)"])]
 def series(r,cols):
     if cols is None:
@@ -247,6 +245,12 @@ if [ "${1:-}" = "plot" ]; then
   exit 0
 fi
 
+if [ "${1:-}" = "fix" ]; then
+  echo "=== cancelling the unneeded kinetics reruns and the first blockade submission ==="
+  scancel -u "$USER" -n kin_std_m,kin_std_f,kin_nsq_m,kin_nsq_f,kin_cd4_m,kin_cd4_f,blk_m,blk_f 2>/dev/null
+  sleep 5; rm -rf runs_big/kin runs_big/blockall; echo "   removed runs_big/kin and runs_big/blockall"
+fi
+
 # --------------------------------------------------------------- task 0 -----
 {
 echo "######## do_tasks.sh  $(date)"
@@ -263,6 +267,8 @@ for f in $(find . -path ./runs_big -prune -o -name "app_rxn_diff*.cpp" -print -o
 done
 } | tee $REPORT
 
+LOG1=$(ls runs_big/prod/male/s*/log.spparks 2>/dev/null | head -1)
+HDR=$(grep -m1 "sum(i1)" "$LOG1" 2>/dev/null || true)
 HAVE_KIN=0; echo "$HDR" | grep -q "sum(i2)" && HAVE_KIN=1
 echo "  kinetics columns already in logs: $HAVE_KIN" | tee -a $REPORT
 grep -q "^diag_style *array" "$DECK" && CANDIAG=1 || CANDIAG=0
@@ -294,9 +300,9 @@ chmod +x "$JOB"
 # submit COND BASE N SLIDE FEM SEDLINES...
 submit() {
   local name=$1 base=$2 n=$3 slidepath=$4 fem=$5; shift 5
+  if [ -f "$base/cfg.sh" ]; then echo "   $name already submitted ($base) -- skipping"; return; fi
   mkdir -p "$base"
   printf '%s\n' "$@" > "$base/extra.sed"
-  [ "$CANDIAG" = 1 ] && [ "$HAVE_KIN" = 0 ] && echo "/^diag_style *array/ s/diag_style *array/diag_style array $DIAGCOLS/" >> "$base/extra.sed"
   cat > "$base/cfg.sh" <<EOF
 BASE=$PWD/$base
 SEEDBASE=9000
@@ -328,26 +334,19 @@ else
   grep -n "app_style" "$DECK" | tee -a $REPORT
 fi
 
-# ---- task 1: kinetics reruns only if the logs lack T-cell / IFN-g columns
-if [ "$HAVE_KIN" = 0 ]; then
-  if [ "$CANDIAG" = 1 ]; then
-    echo "=== task 1: logs only track cancer -> submitting kinetics reruns (n=$NKIN each) ===" | tee -a $REPORT
-    mkdir -p runs_big/kin
-    NOCD4M=runs_big/kin/slides/d14_M_4_SPPARKS_init_noCD4; NOCD4F=runs_big/kin/slides/d14_F_4_SPPARKS_init_noCD4
-    mkdir -p runs_big/kin/slides
-    awk 'f && NF>15 {$10=0; $11=0} /^Values/{f=1} {print}' $MSLIDE > $NOCD4M
-    awk 'f && NF>15 {$10=0; $11=0} /^Values/{f=1} {print}' $FSLIDE > $NOCD4F
-    submit kin_std_m   runs_big/kin/std_male      $NKIN $MSLIDE 0 ""
-    submit kin_std_f   runs_big/kin/std_female    $NKIN $FSLIDE 1 ""
-    submit kin_nsq_m   runs_big/kin/noseq_male    $NKIN $MSLIDE 0 "/^app_style/ s/0.0016667/0/"
-    submit kin_nsq_f   runs_big/kin/noseq_female  $NKIN $FSLIDE 1 "/^app_style/ s/0.0016667/0/"
-    submit kin_cd4_m   runs_big/kin/cd4off_male   $NKIN $NOCD4M 0 ""
-    submit kin_cd4_f   runs_big/kin/cd4off_female $NKIN $NOCD4F 1 ""
-  else
-    echo "!!! task 1: logs lack T-cell columns and the deck has no 'diag_style array' line to extend." | tee -a $REPORT
-    echo "    Paste the deck lines printed above to Claude." | tee -a $REPORT
-  fi
-fi
+# ---- corrected CD4-helper removal: helpers are slide columns i13 (Th) and i14 (ARTh)
+#      = awk fields 16 and 17. (The old run zeroed fields 10/11 = i8 recruitment
+#      marker and i9 error signal, i.e. it removed T-cell recruitment, not CD4.)
+mkdir -p runs_big/cd4off_v2/slides
+NOCD4M=runs_big/cd4off_v2/slides/d14_M_4_SPPARKS_init_noCD4
+NOCD4F=runs_big/cd4off_v2/slides/d14_F_4_SPPARKS_init_noCD4
+for pair in "$MSLIDE:$NOCD4M" "$FSLIDE:$NOCD4F"; do
+  a=${pair%%:*}; b=${pair##*:}
+  awk 'f && NF>15 {$16=0; $17=0} /^Values/{f=1} {print}' "$a" > "$b"
+  echo "   $(basename $b): CD4 entries before=$(awk 'f&&NF>15{c+=($16!=0)+($17!=0)} /^Values/{f=1} END{print c+0}' "$a") after=$(awk 'f&&NF>15{c+=($16!=0)+($17!=0)} /^Values/{f=1} END{print c+0}' "$b")  recruit markers kept=$(awk 'f&&NF>15{c+=($10!=0)} /^Values/{f=1} END{print c+0}' "$b")" | tee -a $REPORT
+done
+submit cd4v2_m runs_big/cd4off_v2/male   $NBLOCK $NOCD4M 0 ""
+submit cd4v2_f runs_big/cd4off_v2/female $NBLOCK $NOCD4F 1 ""
 
 echo | tee -a $REPORT
 echo "=== plots possible right now (tasks 2, 3, and 1 if columns exist) ===" | tee -a $REPORT
