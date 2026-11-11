@@ -34,7 +34,7 @@ for sex in ("male","female"):
     ix=np.clip(d["x"].astype(int),0,L-1); iy=np.clip(d["y"].astype(int),0,L-1)
     can[iy,ix]=d["i1"]; mat[iy,ix]=d["i3"]
     # cancer cells touching each site: own site + 4 neighbours (no wrap: edges blocked)
-    P=np.pad(can,1)
+    P=np.pad(can,1,mode="constant")
     touch=P[1:-1,1:-1]+P[:-2,1:-1]+P[2:,1:-1]+P[1:-1,:-2]+P[1:-1,2:]
     n=mat.sum(); m=mat>0
     inc=(mat*(touch>0)).sum()
