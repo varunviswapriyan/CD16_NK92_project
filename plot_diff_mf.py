@@ -17,19 +17,20 @@ def window(x):
     mx = x.max(); m = (x > 0.05*mx) & (x < 0.55*mx)
     return m if m.sum() >= 3 else np.ones_like(x, bool)
 fig, ax = plt.subplots(figsize=(6.4, 5))
-for a, col, lab in (("0", "#b81f5b", "female-like (no AR+ cells)"),
-                    (MALE, "#1f4db8", f"male-like (AR+ cells, {MALE} per pixel)")):
+for a, col, lab in (("0", "#b81f5b", "no AR+ T cells"),
+                    (MALE, "#1f4db8", f"with AR+ T cells ({MALE} per 30 µm pixel)")):
     b, z = load(a)
     t, x = b[:, 0], b[:, 1]; m = window(x)
     sl, ic = np.polyfit(t[m], x[m], 1)
     zw = window(z[:, 1]); zsl = np.polyfit(z[zw, 0], z[zw, 1], 1)[0]
     d = 20.0 * sl / zsl
     if a == "0":
-        ax.plot(t, x, "o", ms=3, color=col, alpha=.5)
-        ax.plot(t, sl*t + ic, "-", color=col, lw=2, label=f"{lab}: D_eff = {d:.2f} µm²/s")
+        ax.plot(t, x, "-", color=col, lw=1.2, alpha=.45)
+        ax.plot(t, sl*t + ic, "--", color=col, lw=1.5, label=f"{lab}: linear fit, D_eff = {d:.2f} µm²/s")
+        ax.plot([],[],"-",color=col,lw=1.2,alpha=.45,label=f"{lab}: simulation")
         print(f"{lab:40s} D_eff = {d:.3f} um^2/s")
     else:  # internalization is a sink: front stalls, a single D_eff does not describe it
-        ax.plot(t, x, "o-", ms=3, color=col, alpha=.8, label=f"{lab}: front stalls (not diffusive)")
+        ax.plot(t, x, "-", color=col, lw=2, label=f"{lab}: front stalls")
         e = t <= 24; se = np.polyfit(t[e], x[e], 1)[0]
         print(f"{lab:40s} front^2 at end = {x[-1]:.0f} um^2 vs female {fem_end:.0f}  (early slope {se:.0f} um^2/h)")
     if a == "0": fem_end = x[-1]
