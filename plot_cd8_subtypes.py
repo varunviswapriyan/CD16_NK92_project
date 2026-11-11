@@ -48,7 +48,7 @@ for ax,sex in zip(axs,("male","female")):
     ax.plot(DAYS,tot,"k--",lw=2,label="total CD8")
     print(f"  {'total CD8':16s}        "+"  ".join(f"{tot[i]:7.0f}" for i in (0,40,80,140)))
     ax.set_title(f"CD8 subtypes, standard model — {sex} (n={len(R)})")
-    ax.set_xlabel("Day"); ax.set_ylabel("cells"); ax.grid(True,color="#eee",lw=.6)
+    ax.set_xlabel("Day"); ax.set_ylabel("cells"); ax.grid(True,color="#eeeeee",lw=.6)
     ax.legend(frameon=False,fontsize=9)
 fig.tight_layout(); fig.savefig("figures/CD8_subtypes_standard.png",dpi=170)
 print("\nwrote figures/CD8_subtypes_standard.png")
