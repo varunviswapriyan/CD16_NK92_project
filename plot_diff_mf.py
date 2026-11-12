@@ -17,8 +17,8 @@ def window(x):
     mx = x.max(); m = (x > 0.05*mx) & (x < 0.55*mx)
     return m if m.sum() >= 3 else np.ones_like(x, bool)
 fig, ax = plt.subplots(figsize=(6.4, 5))
-for a, col, lab in (("0", "#b81f5b", "no AR+ T cells"),
-                    (MALE, "#1f4db8", f"with AR+ T cells ({MALE} per 30 µm pixel)")):
+for a, col, lab in (("0", "#b81f5b", "female (no AR+ T cells)"),
+                    (MALE, "#1f4db8", f"male (AR+ T cells, {MALE} per 30 µm pixel)")):
     b, z = load(a)
     t, x = b[:, 0], b[:, 1]; m = window(x)
     sl, ic = np.polyfit(t[m], x[m], 1)
