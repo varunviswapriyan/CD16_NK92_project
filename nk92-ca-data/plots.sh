@@ -11,7 +11,7 @@ PY="${PY:-python3}"
 OUT="${OUT:-$HOME/ca_plots}"
 PORT="${PORT:-8000}"
 F="${F:-$HOME/CD16_NK92_project/filesCC}"
-FITS="${FITS:-$HOME/nk92-fits}"
+FITS="${FITS:-$HOME/CD16_NK92_project/nk92-ca-data}"
 EXP2="${EXP2:-$HOME/Ca_fit_exp2}"
 CHECK="${CHECK:-$HOME/ca_check}"
 BOOT="$F/bootstrap_ca2.py"
@@ -54,21 +54,28 @@ grab() {  # grab <src> <newname> <caption>
 grab "$CHECK/ca_data.png" "01_data.png" \
      "Ca data: Indo-1 ratio mean +/- SE, Experiment 1 and Experiment 2"
 
-# ------------------------------------------------------- 2. Exp 1 fits
-if [ -d "$FITS" ]; then
-  ( cd "$FITS" && "$PY" plot_ca_fit.py orig   >/dev/null 2>&1 )
-  ( cd "$FITS" && "$PY" plot_pzap_fit.py      >/dev/null 2>&1 )
-  for p in "$FITS"/*.png; do
-    [ -f "$p" ] || continue
-    b="$(basename "$p")"
-    case "$b" in
-      *ca*)   grab "$p" "02_$b" "Experiment 1 Ca fit, variant orig (her 5 parameters)" ;;
-      *pzap*) grab "$p" "03_$b" "pZAP70 fit" ;;
-      *)      grab "$p" "04_$b" "$b" ;;
-    esac
-  done
+# ------------------------------------------------------- 2. pZAP70 fit
+# plot_pzap_fit.py must run from the directory holding optimized_model_pzap/,
+# not from the repo. Find that directory; prefer one that also carries the
+# experimental data under estimate_params_pzap/data/.
+PZDIR=""
+while IFS= read -r f; do
+  d="$(dirname "$(dirname "$f")")"
+  [ -z "$PZDIR" ] && PZDIR="$d"
+  [ -d "$d/estimate_params_pzap/data" ] && { PZDIR="$d"; break; }
+done < <(find "$HOME" -maxdepth 4 -path '*/optimized_model_pzap/model_output_pzap_v77.csv' 2>/dev/null | sort)
+
+if [ -n "$PZDIR" ]; then
+  echo "   pZAP70 model output under: $PZDIR"
+  ( "$PY" "$FITS/plot_pzap_fit.py" --dir "$PZDIR" --out "$OUT/03_pzap_fit.png" ) 2>&1 | sed 's/^/     /'
+  if [ -f "$OUT/03_pzap_fit.png" ]; then
+    printf '%s\t%s\n' "03_pzap_fit.png" "pZAP70 best fit (v77) vs experiment" >> "$CAPS"
+    ok "pZAP70 fit"
+  else
+    skip "pZAP70 fit (plot_pzap_fit.py produced nothing)"
+  fi
 else
-  skip "nk92-fits repo not at $FITS"
+  skip "pZAP70 fit (no optimized_model_pzap/model_output_pzap_v77.csv found)"
 fi
 
 # ------------------------------------------------------- 3. Exp 1 bands
