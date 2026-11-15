@@ -2,12 +2,13 @@
 # plot_d7_fold.sh -- tumour growth fold change vs time for the day 7 -> 14 runs (started from the
 # day-7 mIF slides with CD4), male and female. Same style and axes as the day 14 -> 21 figure
 # (Figure4_giuseppe_style.png): time in hours, log y, individual runs faint, ratio bracket.
-# Run: cd ~/CD16_NK92_project && git pull --no-edit && bash plot_d7_fold.sh
+# Run: cd ~/CD16_NK92_project && git pull --no-edit && bash plot_d7_fold.sh   (LIN=1 bash plot_d7_fold.sh for a linear y-axis)
 cd ~/CD16_NK92_project/SPPARKS_Sex_Bias || exit 1
 source /gpfs0/scratch/miniforge3/24.11.2/etc/profile.d/conda.sh 2>/dev/null && conda activate CD16_v2 2>/dev/null
 mkdir -p figures
 python3 - <<'PY'
-import glob, numpy as np, matplotlib
+import glob, os, numpy as np, matplotlib
+LIN=os.environ.get("LIN")=="1"   # LIN=1: linear y-axis instead of log
 matplotlib.use("Agg"); import matplotlib.pyplot as plt
 from matplotlib.ticker import FixedLocator, NullLocator, FuncFormatter
 H=np.linspace(0,168,337)
@@ -40,11 +41,14 @@ for lab,base,fn in CONDS:
         for r in A: ax.plot(H,r,color=col,alpha=.06,lw=1)
         ax.plot(H,A.mean(0),color=col,lw=2.4,label=f"{sex} mouse")
     ax.axhline(1,ls="--",color="grey",lw=1.2)
-    ax.set_yscale("log")
     top=max(M.mean(0)[-1],F.mean(0)[-1])
-    ticks=np.round(np.arange(1.0,top+0.2,0.2),1)
-    ax.yaxis.set_major_locator(FixedLocator(ticks)); ax.yaxis.set_minor_locator(NullLocator())
-    ax.yaxis.set_major_formatter(FuncFormatter(lambda v,_: r"$10^0$" if abs(v-1)<1e-9 else rf"${v:.1f}\times10^0$"))
+    if LIN:
+        fn=fn.replace(".png","_linear.png")
+    else:
+        ax.set_yscale("log")
+        ticks=np.round(np.arange(1.0,top+0.2,0.2),1)
+        ax.yaxis.set_major_locator(FixedLocator(ticks)); ax.yaxis.set_minor_locator(NullLocator())
+        ax.yaxis.set_major_formatter(FuncFormatter(lambda v,_: r"$10^0$" if abs(v-1)<1e-9 else rf"${v:.1f}\times10^0$"))
     ax.set_ylim(0.95,top*1.05); ax.set_xlim(-8,178); ax.set_xticks([0,25,50,75,100,125,150,175])
     ax.set_xlabel("Time (hours)",fontsize=14,fontweight="bold")
     ax.set_ylabel("Cancer Cell\nPopulation Fold Change",fontsize=14,fontweight="bold")
@@ -57,4 +61,4 @@ for lab,base,fn in CONDS:
     fig.savefig(f"figures/{fn}",dpi=200)
     print(f"wrote figures/{fn}   {lab}: male {ym:.3f}  female {yf:.3f}  ratio x{ratio:.2f}")
 PY
-echo "View: cd ~/CD16_NK92_project/SPPARKS_Sex_Bias && python -m http.server 8001  ->  /figures/Fold_day7_to_14.png"
+echo "View: cd ~/CD16_NK92_project/SPPARKS_Sex_Bias/figures && python -m http.server 8001  ->  /Fold_day7_to_14.png  or  /Fold_day7_to_14_linear.png"
