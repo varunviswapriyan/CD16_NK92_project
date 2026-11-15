@@ -27,7 +27,7 @@ mkdir -p figures $OUTI
 
 if [ "${1:-}" = "analyze" ]; then
   echo "jobs still queued/running: $(squeue -u $USER -h -n d7c_m,d7c_f 2>/dev/null | wc -l)"
-  python3 $P/zihai_analysis.py figures
+  python3 $P/zihai_analysis.py data "$DATA" > /dev/null && python3 $P/zihai_analysis.py figures
   exit 0
 fi
 

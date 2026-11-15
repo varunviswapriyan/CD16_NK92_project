@@ -13,8 +13,8 @@ Outputs (in SPPARKS_Sex_Bias/):
   figures/Infiltration_model_vs_data.png
   figures/Day7_to_14_fold.png
   zihai_summary.txt
-Same definitions on both sides: cancer/tissue mask = 31x31-site (310 um) box average of
-"site has a CD3- cell (data) / cancer cell (model)" > 0.5; distance = Euclidean distance to the mask
+Same definitions on both sides: cancer mask = 31x31-site (310 um) box average of "site has a cancer
+cell" > 0.5, where cancer = random 70% of CD3- cells (the rule used to build the starting files); distance = Euclidean distance to the mask
 edge, + inside, - outside; CD8 density = CD8 cells per mm^2 of lattice area in each 100 um band.
 """
 import sys, os, glob, csv
@@ -23,6 +23,7 @@ from convert_zihai import read_slide, types, bins
 
 UM = 10.0; PIX_MM2 = (UM / 1000) ** 2
 BANDS = np.arange(-500, 801, 100)
+MIN_BAND_MM2 = 0.3
 try:
     from scipy.ndimage import distance_transform_edt as _edt
 except Exception:
@@ -51,7 +52,8 @@ def profile(cancer_grid, cd8_grid):
     out = []
     for a, b in zip(BANDS[:-1], BANDS[1:]):
         sel = (sd >= a) & (sd < b)
-        out.append(cd8_grid[sel].sum() / (sel.sum() * PIX_MM2) if sel.sum() > 0 else np.nan)
+        # bands covering < MIN_BAND_MM2 of tissue are too small to give a density (noise): leave blank
+        out.append(cd8_grid[sel].sum() / (sel.sum() * PIX_MM2) if sel.sum() * PIX_MM2 >= MIN_BAND_MM2 else np.nan)
     return np.array(out), mask.sum() * PIX_MM2
 
 
@@ -65,7 +67,8 @@ def cmd_data(ddir):
         H, W = Y.max() + 1, X.max() + 1
         g = lambda m: np.bincount(Y[m] * W + X[m], minlength=H * W).reshape(H, W).astype(float)
         cd8 = T["i2"] | T["i3"] | T["i4"] | T["i6"] | T["i7"]; arp = T["i6"] | T["i7"]; cd4 = T["i13"] | T["i14"]
-        p, mask_mm2 = profile(g(~s["cd3"]), g(cd8))
+        rng = np.random.default_rng(1)                      # same rule as the starting files: cancer = random 70% of CD3-
+        p, mask_mm2 = profile(g(~s["cd3"] & (rng.random(len(cd8)) < 0.7)), g(cd8))
         prof[name] = p
         tissue_mm2 = (box_blur((g(np.ones(len(cd8), bool)) > 0).astype(float), 5) > 0.2).sum() * PIX_MM2
         rows.append(dict(slide=name, day=day, sex="male" if sex == "M" else "female", cells=len(cd8),
