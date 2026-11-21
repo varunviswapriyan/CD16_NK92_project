@@ -29,7 +29,7 @@
 //   <prefix>_front.csv    : run, time_h, front_um, front_um2
 //
 // Build: g++ -O3 -std=c++17 ifng_effective_diffusion.cpp -o ifng_effective_diffusion
-// Run:   ./ifng_effective_diffusion [prefix] [days] [front_fraction] [AR+ cells per IFNG pixel]
+// Run:   ./ifng_effective_diffusion [prefix] [days] [front_fraction] [AR+ cells per IFNG pixel] [D multiplier]
 // ============================================================================
 #include <cstdio>
 #include <cstdlib>
@@ -40,8 +40,8 @@
 
 static const int    N        = 200;       // IFNG pixels per side
 static const double A        = 30.0;      // IFNG pixel size (um)
-static const double D        = 20.0;      // um^2/s
-static const double DT       = 9.0;       // s  (0.015 native units x 600 s)
+static double D  = 20.0;                   // um^2/s (arg 5 multiplies it)
+static double DT = 9.0;                    // s; divided by the same factor to keep the explicit scheme stable
 static const double KD       = 100.0;     // molecules per IFNG pixel (unbinding/binding = 100/1)
 static const double REC      = 1000.0;    // IFNGR per cell
 static const double K_PROD   = 0.1;       // ifng_production (per s)
@@ -137,6 +137,9 @@ int main(int argc, char** argv) {
   double days = argc > 2 ? std::atof(argv[2]) : 7.0;
   double frac = argc > 3 ? std::atof(argv[3]) : 0.01;
   ARP = argc > 4 ? std::atof(argv[4]) : 0.0;
+  double dm = argc > 5 ? std::atof(argv[5]) : 1.0;
+  D *= dm; DT /= dm;
+  std::fprintf(stderr, "D = %g um^2/s, DT = %g s\n", D, DT);
   std::fprintf(stderr, "AR+ T cells per IFNG pixel = %g\n", ARP);
 
   std::FILE* prof = std::fopen((prefix + "_profiles.csv").c_str(), "w");
