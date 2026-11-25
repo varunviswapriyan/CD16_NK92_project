@@ -58,7 +58,7 @@ static double hill(double x, double K, int n) {
   return xn / (Kn + xn + 1e-30);
 }
 
-struct Result { std::vector<double> t_h, front; };
+struct Result { std::vector<double> t_h, front, front_area; };
 
 // with_receptors=false -> bare diffusion calibration run
 static Result run(bool with_receptors, double days, double frac,
@@ -121,8 +121,14 @@ static Result run(bool with_receptors, double days, double frac,
           break;
         }
       }
+      // area-based front: radius of a disc with the same area as all pixels with free IFNG >= thr
+      // (averages over the whole 2D region, so it is smooth when the front moves one pixel at a time)
+      long cnt = 0;
+      for (int k = 0; k < N * N; k++) if (f[k] >= thr && thr > 0) cnt++;
+      double front_area = std::sqrt(cnt * A * A / M_PI);
       res.t_h.push_back(t_h);
       res.front.push_back(front);
+      res.front_area.push_back(front_area);
       if (front >= stop_front_um) break;
     }
     if (profiles && step % prof_every == 0) {
@@ -157,11 +163,11 @@ int main(int argc, char** argv) {
   ARP = saveARP;   // stops near the box edge
 
   std::FILE* fr = std::fopen((prefix + "_front.csv").c_str(), "w");
-  std::fprintf(fr, "run,time_h,front_um,front_um2\n");
+  std::fprintf(fr, "run,time_h,front_um,front_um2,front_area_um2\n");
   for (size_t i = 0; i < rb.t_h.size(); i++)
-    std::fprintf(fr, "bound,%.2f,%.3f,%.3f\n", rb.t_h[i], rb.front[i], rb.front[i] * rb.front[i]);
+    std::fprintf(fr, "bound,%.2f,%.3f,%.3f,%.3f\n", rb.t_h[i], rb.front[i], rb.front[i] * rb.front[i], rb.front_area[i] * rb.front_area[i]);
   for (size_t i = 0; i < r0.t_h.size(); i++)
-    std::fprintf(fr, "bare,%.2f,%.3f,%.3f\n", r0.t_h[i], r0.front[i], r0.front[i] * r0.front[i]);
+    std::fprintf(fr, "bare,%.2f,%.3f,%.3f,%.3f\n", r0.t_h[i], r0.front[i], r0.front[i] * r0.front[i], r0.front_area[i] * r0.front_area[i]);
   std::fclose(fr);
   std::fprintf(stderr, "wrote %s_profiles.csv and %s_front.csv\n", prefix.c_str(), prefix.c_str());
   return 0;
