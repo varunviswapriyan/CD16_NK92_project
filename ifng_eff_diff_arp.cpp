@@ -29,7 +29,8 @@
 //   <prefix>_front.csv    : run, time_h, front_um, front_um2
 //
 // Build: g++ -O3 -std=c++17 ifng_effective_diffusion.cpp -o ifng_effective_diffusion
-// Run:   ./ifng_effective_diffusion [prefix] [days] [front_fraction] [AR+ cells per IFNG pixel] [D multiplier]
+// Run:   ./ifng_effective_diffusion [prefix] [days] [front_fraction] [AR+ cells per IFNG pixel] [D multiplier] [K]
+//        K = 0 means IFNG never unbinds: free IFNG binds until the free receptors in a pixel are used up
 // ============================================================================
 #include <cstdio>
 #include <cstdlib>
@@ -42,7 +43,7 @@ static const int    N        = 200;       // IFNG pixels per side
 static const double A        = 30.0;      // IFNG pixel size (um)
 static double D  = 20.0;                   // um^2/s (arg 5 multiplies it)
 static double DT = 9.0;                    // s; divided by the same factor to keep the explicit scheme stable
-static const double KD       = 100.0;     // molecules per IFNG pixel (unbinding/binding = 100/1)
+static double KD = 100.0;                 // molecules per IFNG pixel (unbinding/binding = 100/1); arg 6 overrides, 0 = no unbinding
 static const double REC      = 1000.0;    // IFNGR per cell
 static const double K_PROD   = 0.1;       // ifng_production (per s)
 static const double MAX_FB   = 2.0;       // max_ifng_production
@@ -139,12 +140,14 @@ int main(int argc, char** argv) {
   ARP = argc > 4 ? std::atof(argv[4]) : 0.0;
   double dm = argc > 5 ? std::atof(argv[5]) : 1.0;
   D *= dm; DT /= dm;
+  if (argc > 6) KD = std::atof(argv[6]);
+  std::fprintf(stderr, "K = %g molecules per IFNG pixel%s\n", KD, KD == 0 ? " (no unbinding)" : "");
   std::fprintf(stderr, "D = %g um^2/s, DT = %g s\n", D, DT);
   std::fprintf(stderr, "AR+ T cells per IFNG pixel = %g\n", ARP);
 
   std::FILE* prof = std::fopen((prefix + "_profiles.csv").c_str(), "w");
   std::fprintf(prof, "time_h,x_um,free_ifng_per_site\n");
-  std::fprintf(stderr, "bound run (R0 = 9000 per pixel, K = 100) for %g days...\n", days);
+  std::fprintf(stderr, "bound run (R0 = 9000 per pixel, K = %g) for %g days...\n", KD, days);
   Result rb = run(true, days, frac, prof, 2700.0);
   std::fclose(prof);
 
